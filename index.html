@@ -1,0 +1,3296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Đại Chiến Người Que - Bóng Mờ Chuyển Động & Rồng 3 Đầu<</title>
+  <style>
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #232946 0%, #0d1021 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      color: #fffffe;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      overflow: hidden;
+    }
+
+    canvas {
+      border: 3px solid #eebbc3;
+      border-radius: 12px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85), 0 0 28px rgba(238, 187, 195, 0.18);
+      background: #121629;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: space-between;
+      width: 900px;
+      margin-top: 12px;
+      font-size: 11.5px;
+      background: rgba(35, 41, 70, 0.92);
+      padding: 10px 18px;
+      box-sizing: border-box;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+      gap: 12px;
+    }
+
+    .p1-text {
+      color: #00d2ff;
+      font-weight: bold;
+    }
+
+    .p2-text {
+      color: #ff6b6b;
+      font-weight: bold;
+    }
+
+    .zombie-text {
+      color: #2ec4b6;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+<canvas id="gameCanvas" width="900" height="450"></canvas>
+
+<div class="controls">
+  <div>
+    <span class="p1-text">P1:</span>
+    Di chuyển: <b>A/D/W</b> | Đánh: <b>Space</b> | Đổi VK: <b>E</b> | Quái: <b>Q</b> | Ném giáo: <b>Z</b> | Chế độ:
+    <b>M</b> | Sàn: <b>B</b> | Âm thanh/Nhạc: <b>N</b>
+  </div>
+  <div>
+    <span class="p2-text">RỒNG 3 ĐẦU:</span> <b>Cào Rồng • Khạc 3 Lửa • Chiêu Đặc Biệt (Rung Màn Hình)</b> | <span
+          class="zombie-text">Zombie: Boss Đợt 5/10 & Rớt Máu/TNT</span>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById("gameCanvas");
+  const ctx = canvas.getContext("2d");
+
+  const GRAVITY = 0.6;
+  const GROUND_Y = 360;
+  const MONSTER_BONUS_HP = 45;
+
+  // ==================== WEB AUDIO API SOUND & BGM ENGINE ====================
+  let audioCtx = null;
+  let soundMuted = false;
+  let bgmInterval = null;
+  let bgmStep = 0;
+
+  function ensureAudioContext() {
+    if (soundMuted) return null;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return null;
+    if (!audioCtx) {
+      audioCtx = new AudioContextClass();
+    }
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume().catch(() => {
+      });
+    }
+    return audioCtx;
+  }
+
+  function toggleSoundMute() {
+    soundMuted = !soundMuted;
+    if (soundMuted) {
+      stopBGM();
+    } else {
+      if (gameState === "fight" || gameState === "zombie") {
+        startBGM();
+      }
+    }
+    spawnFloatingText(
+            canvas.width / 2,
+            85,
+            soundMuted ? "ĐÃ TẮT ÂM THANH & NHẠC [N]" : "ĐÃ BẬT ÂM THANH & NHẠC [N]",
+            soundMuted ? "#ff6b6b" : "#74c69d",
+            14
+    );
+  }
+
+  // --- BGM SYNTHESIZER (ARCADE ACTION) ---
+  const BGM_BASS_LINE = [130.81, 130.81, 155.56, 174.61, 196.00, 174.61, 155.56, 146.83];
+  const BGM_MELODY_LINE = [523.25, 0, 659.25, 587.33, 783.99, 0, 659.25, 523.25, 587.33, 659.25, 783.99, 880.00, 783.99, 659.25, 587.33, 0];
+
+  function playBGMTick() {
+    if (soundMuted) return;
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+
+    const now = ctxInstance.currentTime;
+
+    const bassFreq = BGM_BASS_LINE[bgmStep % BGM_BASS_LINE.length];
+    if (bassFreq > 0) {
+      const osc = ctxInstance.createOscillator();
+      const gain = ctxInstance.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(bassFreq, now);
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.06, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+      osc.connect(gain);
+      gain.connect(ctxInstance.destination);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    }
+
+    const melFreq = BGM_MELODY_LINE[bgmStep % BGM_MELODY_LINE.length];
+    if (melFreq > 0) {
+      const osc = ctxInstance.createOscillator();
+      const gain = ctxInstance.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(melFreq, now);
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.035, now + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+      osc.connect(gain);
+      gain.connect(ctxInstance.destination);
+      osc.start(now);
+      osc.stop(now + 0.13);
+    }
+
+    bgmStep++;
+  }
+
+  function startBGM() {
+    if (bgmInterval || soundMuted) return;
+    bgmStep = 0;
+    bgmInterval = setInterval(playBGMTick, 145);
+  }
+
+  function stopBGM() {
+    if (bgmInterval) {
+      clearInterval(bgmInterval);
+      bgmInterval = null;
+    }
+  }
+
+  function playDrawSound() {
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+    const now = ctxInstance.currentTime;
+    const notes = [392.00, 349.23];
+
+    notes.forEach((freq, idx) => {
+      const start = now + idx * 0.14;
+      const osc = ctxInstance.createOscillator();
+      const gain = ctxInstance.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, start);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.15, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.22);
+
+      osc.connect(gain);
+      gain.connect(ctxInstance.destination);
+      osc.start(start);
+      osc.stop(start + 0.23);
+    });
+  }
+
+  // --- SOUND EFFECTS ---
+  function createNoiseBuffer(ctxInstance, duration) {
+    const sampleRate = ctxInstance.sampleRate;
+    const length = Math.max(1, Math.floor(sampleRate * duration));
+    const buffer = ctxInstance.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
+    return buffer;
+  }
+
+  function playJumpSound() {
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+    const now = ctxInstance.currentTime;
+
+    const osc = ctxInstance.createOscillator();
+    const gain = ctxInstance.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(165, now);
+    osc.frequency.exponentialRampToValueAtTime(420, now + 0.11);
+
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.14, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
+
+    osc.connect(gain);
+    gain.connect(ctxInstance.destination);
+    osc.start(now);
+    osc.stop(now + 0.12);
+  }
+
+  function playHitSound(isHeavy = false) {
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+    const now = ctxInstance.currentTime;
+    const duration = isHeavy ? 0.16 : 0.09;
+
+    const osc = ctxInstance.createOscillator();
+    const gain = ctxInstance.createGain();
+    osc.type = isHeavy ? "sawtooth" : "triangle";
+    osc.frequency.setValueAtTime(isHeavy ? 145 : 210, now);
+    osc.frequency.exponentialRampToValueAtTime(42, now + duration);
+
+    gain.gain.setValueAtTime(isHeavy ? 0.22 : 0.15, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    osc.connect(gain);
+    gain.connect(ctxInstance.destination);
+    osc.start(now);
+    osc.stop(now + duration + 0.01);
+  }
+
+  function playPickupSound(isHeal = true) {
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+    const now = ctxInstance.currentTime;
+    const notes = isHeal ? [587.33, 880] : [330, 440, 659.25];
+
+    notes.forEach((freq, idx) => {
+      const start = now + idx * 0.06;
+      const osc = ctxInstance.createOscillator();
+      const gain = ctxInstance.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(freq, start);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.14, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.14);
+
+      osc.connect(gain);
+      gain.connect(ctxInstance.destination);
+      osc.start(start);
+      osc.stop(start + 0.15);
+    });
+  }
+
+  function playWaveClearSound() {
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+    const now = ctxInstance.currentTime;
+    const notes = [440, 554.37, 659.25, 880];
+
+    notes.forEach((freq, idx) => {
+      const start = now + idx * 0.07;
+      const osc = ctxInstance.createOscillator();
+      const gain = ctxInstance.createGain();
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, start);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.15, start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.16);
+
+      osc.connect(gain);
+      gain.connect(ctxInstance.destination);
+      osc.start(start);
+      osc.stop(start + 0.17);
+    });
+  }
+
+  function playSlashSound() {
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+    const now = ctxInstance.currentTime;
+    const duration = 0.12;
+
+    const noise = ctxInstance.createBufferSource();
+    noise.buffer = createNoiseBuffer(ctxInstance, duration);
+
+    const filter = ctxInstance.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.Q.setValueAtTime(2.6, now);
+    filter.frequency.setValueAtTime(1400, now);
+    filter.frequency.exponentialRampToValueAtTime(340, now + duration);
+
+    const gain = ctxInstance.createGain();
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.24, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctxInstance.destination);
+
+    noise.start(now);
+    noise.stop(now + duration);
+  }
+
+  function playGunSound(isArrow = false) {
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+    const now = ctxInstance.currentTime;
+
+    const duration = isArrow ? 0.09 : 0.11;
+    const noise = ctxInstance.createBufferSource();
+    noise.buffer = createNoiseBuffer(ctxInstance, duration);
+
+    const filter = ctxInstance.createBiquadFilter();
+    filter.type = isArrow ? "bandpass" : "highpass";
+    filter.frequency.setValueAtTime(isArrow ? 950 : 650, now);
+    filter.frequency.exponentialRampToValueAtTime(isArrow ? 320 : 190, now + duration);
+
+    const noiseGain = ctxInstance.createGain();
+    noiseGain.gain.setValueAtTime(isArrow ? 0.14 : 0.25, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    noise.connect(filter);
+    filter.connect(noiseGain);
+    noiseGain.connect(ctxInstance.destination);
+    noise.start(now);
+    noise.stop(now + duration);
+
+    const osc = ctxInstance.createOscillator();
+    const oscGain = ctxInstance.createGain();
+    osc.type = isArrow ? "triangle" : "sawtooth";
+    osc.frequency.setValueAtTime(isArrow ? 260 : 190, now);
+    osc.frequency.exponentialRampToValueAtTime(52, now + 0.085);
+
+    oscGain.gain.setValueAtTime(isArrow ? 0.11 : 0.18, now);
+    oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.085);
+
+    osc.connect(oscGain);
+    oscGain.connect(ctxInstance.destination);
+    osc.start(now);
+    osc.stop(now + 0.09);
+  }
+
+  function playDragonFireSound(isSpecial = false) {
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+    const now = ctxInstance.currentTime;
+    const duration = isSpecial ? 0.46 : 0.24;
+
+    const noise = ctxInstance.createBufferSource();
+    noise.buffer = createNoiseBuffer(ctxInstance, duration);
+
+    const filter = ctxInstance.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.Q.setValueAtTime(isSpecial ? 1.5 : 2.0, now);
+    filter.frequency.setValueAtTime(isSpecial ? 520 : 680, now);
+    filter.frequency.exponentialRampToValueAtTime(160, now + duration);
+
+    const gain = ctxInstance.createGain();
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(isSpecial ? 0.34 : 0.22, now + 0.04);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctxInstance.destination);
+    noise.start(now);
+    noise.stop(now + duration);
+
+    const roar = ctxInstance.createOscillator();
+    const roarGain = ctxInstance.createGain();
+    roar.type = "sawtooth";
+    roar.frequency.setValueAtTime(isSpecial ? 135 : 110, now);
+    roar.frequency.exponentialRampToValueAtTime(42, now + duration);
+
+    roarGain.gain.setValueAtTime(isSpecial ? 0.2 : 0.11, now);
+    roarGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    roar.connect(roarGain);
+    roarGain.connect(ctxInstance.destination);
+    roar.start(now);
+    roar.stop(now + duration);
+  }
+
+  function playTntExplosionSound() {
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+    const now = ctxInstance.currentTime;
+    const duration = 0.52;
+
+    const noise = ctxInstance.createBufferSource();
+    noise.buffer = createNoiseBuffer(ctxInstance, duration);
+
+    const filter = ctxInstance.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(920, now);
+    filter.frequency.exponentialRampToValueAtTime(85, now + duration);
+
+    const gain = ctxInstance.createGain();
+    gain.gain.setValueAtTime(0.38, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    noise.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctxInstance.destination);
+    noise.start(now);
+    noise.stop(now + duration);
+
+    const boom = ctxInstance.createOscillator();
+    const boomGain = ctxInstance.createGain();
+    boom.type = "sine";
+    boom.frequency.setValueAtTime(120, now);
+    boom.frequency.exponentialRampToValueAtTime(28, now + 0.42);
+
+    boomGain.gain.setValueAtTime(0.32, now);
+    boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.44);
+
+    boom.connect(boomGain);
+    boomGain.connect(ctxInstance.destination);
+    boom.start(now);
+    boom.stop(now + 0.45);
+  }
+
+  function playLevelUpSound() {
+    const ctxInstance = ensureAudioContext();
+    if (!ctxInstance) return;
+    const now = ctxInstance.currentTime;
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+
+    notes.forEach((freq, idx) => {
+      const start = now + idx * 0.075;
+      const osc = ctxInstance.createOscillator();
+      const gain = ctxInstance.createGain();
+
+      osc.type = "triangle";
+      osc.frequency.setValueAtTime(freq, start);
+
+      gain.gain.setValueAtTime(0.001, start);
+      gain.gain.linearRampToValueAtTime(0.18, start + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.18);
+
+      osc.connect(gain);
+      gain.connect(ctxInstance.destination);
+      osc.start(start);
+      osc.stop(start + 0.19);
+    });
+  }
+
+  // =====================================================================
+
+  let screenShakeTime = 0;
+  let screenShakeIntensity = 0;
+  let drawGraceFrames = 0;
+
+  function triggerScreenShake(intensity = 8, duration = 12) {
+    screenShakeIntensity = Math.max(screenShakeIntensity, intensity);
+    screenShakeTime = Math.max(screenShakeTime, duration);
+  }
+
+  function resetScreenShake() {
+    screenShakeTime = 0;
+    screenShakeIntensity = 0;
+    drawGraceFrames = 0;
+  }
+
+  const STARS = Array.from({length: 42}, (_, i) => ({
+    x: ((i * 97) % 880) + 10,
+    y: ((i * 53) % 190) + 10,
+    r: (i % 4 === 0) ? 2.1 : ((i % 2 === 0) ? 1.4 : 0.9),
+    phase: i * 0.7
+  }));
+
+  const CLOUDS = [
+    {x: 120, y: 78, w: 130, h: 22, speed: 0.14},
+    {x: 420, y: 62, w: 165, h: 26, speed: 0.09},
+    {x: 690, y: 92, w: 120, h: 20, speed: 0.17}
+  ];
+
+  const ARENAS = [
+    {
+      id: "sunset_arena",
+      name: "Đấu Trường Hoàng Hôn",
+      skyTop: "#090d1c",
+      skyMid: "#1d2951",
+      skyBottom: "#59386b",
+      sunColor: "#fff1d0",
+      sunGlow: "#ffbe73",
+      sunHalo: "rgba(255, 190, 115, 0.18)",
+      sunX: 730,
+      sunY: 105,
+      cloudColor: "rgba(255, 196, 155, 0.08)",
+      farMountain: "#121830",
+      midMountain: "#192240",
+      mountainColor: "#222e54",
+      groundTop: "#3d8c68",
+      groundMid: "#1b4332",
+      groundRockTop: "#3b2f2f",
+      groundRockBottom: "#140f0f",
+      trimColor: "#74c69d",
+      ambientParticle: "#ffd166"
+    },
+    {
+      id: "sunrise_highland",
+      name: "Bình Minh Cao Nguyên",
+      skyTop: "#142b47",
+      skyMid: "#36759c",
+      skyBottom: "#f4a261",
+      sunColor: "#fffbe0",
+      sunGlow: "#ffd166",
+      sunHalo: "rgba(255, 224, 130, 0.24)",
+      sunX: 170,
+      sunY: 112,
+      cloudColor: "rgba(255, 248, 220, 0.14)",
+      farMountain: "#234069",
+      midMountain: "#2b4d7a",
+      mountainColor: "#355e94",
+      groundTop: "#56b4e9",
+      groundMid: "#2a9d8f",
+      groundRockTop: "#5c4742",
+      groundRockBottom: "#241b14",
+      trimColor: "#ade8f4",
+      ambientParticle: "#fff3b0"
+    },
+    {
+      id: "ice_valley",
+      name: "Thung Lũng Băng Giá",
+      skyTop: "#061121",
+      skyMid: "#144272",
+      skyBottom: "#2c74b3",
+      sunColor: "#e8fdff",
+      sunGlow: "#90e0ef",
+      sunHalo: "rgba(144, 224, 239, 0.2)",
+      sunX: 740,
+      sunY: 95,
+      cloudColor: "rgba(202, 240, 248, 0.1)",
+      farMountain: "#0f243b",
+      midMountain: "#163352",
+      mountainColor: "#1f456e",
+      groundTop: "#caf0f8",
+      groundMid: "#72efdd",
+      groundRockTop: "#3d5a80",
+      groundRockBottom: "#162236",
+      trimColor: "#ffffff",
+      ambientParticle: "#caf0f8"
+    },
+    {
+      id: "volcano_forge",
+      name: "Hỏa Diệm Đấu Trường",
+      skyTop: "#140509",
+      skyMid: "#4a0e17",
+      skyBottom: "#a82c0c",
+      sunColor: "#ffb703",
+      sunGlow: "#fb5607",
+      sunHalo: "rgba(251, 86, 7, 0.24)",
+      sunX: 450,
+      sunY: 120,
+      cloudColor: "rgba(255, 120, 40, 0.08)",
+      farMountain: "#21070c",
+      midMountain: "#2c0910",
+      mountainColor: "#3d0d16",
+      groundTop: "#78241c",
+      groundMid: "#3b100e",
+      groundRockTop: "#ff5400",
+      groundRockBottom: "#140606",
+      trimColor: "#ff9f1c",
+      ambientParticle: "#ff6b35"
+    }
+  ];
+
+  let currentArenaIndex = 0;
+
+  const ROSTER = [
+    {
+      id: "blue_swordsman",
+      name: "Lam Kiếm Sĩ",
+      color: "#00d2ff",
+      accent: "#72efdd",
+      scale: 1.0,
+      maxHp: 100,
+      moveSpeed: 5,
+      jumpPower: 13,
+      meleeWeapon: "sword",
+      meleeDamage: 15,
+      meleeReach: 65,
+      meleeCooldown: 26,
+      rangedWeapon: "gun",
+      projectileType: "bullet",
+      rangedDamage: 10,
+      rangedCooldown: 22,
+      desc: "Cân bằng • Kiếm & Súng"
+    },
+    {
+      id: "red_spearman",
+      name: "Hỏa Thương Thủ",
+      color: "#ff595e",
+      accent: "#ffca3a",
+      scale: 1.0,
+      maxHp: 105,
+      moveSpeed: 5,
+      jumpPower: 13,
+      meleeWeapon: "spear",
+      meleeDamage: 13,
+      meleeReach: 88,
+      meleeCooldown: 26,
+      rangedWeapon: "bow",
+      projectileType: "arrow",
+      rangedDamage: 12,
+      rangedCooldown: 24,
+      desc: "Thương dài • Thương & Cung"
+    },
+    {
+      id: "green_assassin",
+      name: "Lục Ảnh Khách",
+      color: "#2ec4b6",
+      accent: "#80ed99",
+      scale: 0.95,
+      maxHp: 90,
+      moveSpeed: 6.4,
+      jumpPower: 14.5,
+      meleeWeapon: "sword",
+      meleeDamage: 12,
+      meleeReach: 60,
+      meleeCooldown: 22,
+      rangedWeapon: "gun",
+      projectileType: "bullet",
+      rangedDamage: 8,
+      rangedCooldown: 14,
+      desc: "Siêu nhanh • Bắn liên thanh"
+    },
+    {
+      id: "gold_knight",
+      name: "Kim Giáp Chiến Binh",
+      color: "#ffd166",
+      accent: "#fff3b0",
+      scale: 1.08,
+      maxHp: 125,
+      moveSpeed: 4.3,
+      jumpPower: 12,
+      meleeWeapon: "spear",
+      meleeDamage: 18,
+      meleeReach: 82,
+      meleeCooldown: 30,
+      rangedWeapon: "bow",
+      projectileType: "arrow",
+      rangedDamage: 15,
+      rangedCooldown: 28,
+      desc: "Máu trâu • Đòn đánh nặng"
+    },
+    {
+      id: "titan_brute",
+      name: "Cự Nhân Thạch Lực",
+      color: "#f77f00",
+      accent: "#fcbf49",
+      scale: 1.38,
+      maxHp: 185,
+      moveSpeed: 2.7,
+      jumpPower: 11.2,
+      meleeWeapon: "spear",
+      meleeDamage: 26,
+      meleeReach: 105,
+      meleeCooldown: 38,
+      rangedWeapon: "bow",
+      projectileType: "arrow",
+      rangedDamage: 20,
+      rangedCooldown: 36,
+      desc: "To & Máu/Đam cực lớn • Chậm chạp"
+    },
+    {
+      id: "shadow_reaper",
+      name: "Tử Thần Bóng Đêm",
+      color: "#b5179e",
+      accent: "#f72585",
+      scale: 1.0,
+      maxHp: 95,
+      moveSpeed: 6.1,
+      jumpPower: 14.0,
+      meleeWeapon: "sword",
+      meleeDamage: 19,
+      meleeReach: 68,
+      meleeCooldown: 21,
+      rangedWeapon: "gun",
+      projectileType: "bullet",
+      rangedDamage: 12,
+      rangedCooldown: 16,
+      desc: "Sát thủ • Chém & Bắn tốc độ"
+    },
+    {
+      id: "storm_mage",
+      name: "Lôi Điện Pháp Sư",
+      color: "#4cc9f0",
+      accent: "#e0fbfc",
+      scale: 0.98,
+      maxHp: 92,
+      moveSpeed: 5.2,
+      jumpPower: 13.5,
+      meleeWeapon: "sword",
+      meleeDamage: 13,
+      meleeReach: 62,
+      meleeCooldown: 25,
+      rangedWeapon: "bow",
+      projectileType: "arrow",
+      rangedDamage: 16,
+      rangedCooldown: 18,
+      desc: "Tầm xa mạnh • Bắn nhanh"
+    },
+    {
+      id: "pirate_raider",
+      name: "Hải Tặc Tốc Độ",
+      color: "#ff9f1c",
+      accent: "#ffbf69",
+      scale: 1.0,
+      maxHp: 102,
+      moveSpeed: 5.8,
+      jumpPower: 14.2,
+      meleeWeapon: "sword",
+      meleeDamage: 16,
+      meleeReach: 66,
+      meleeCooldown: 23,
+      rangedWeapon: "gun",
+      projectileType: "bullet",
+      rangedDamage: 11,
+      rangedCooldown: 19,
+      desc: "Cơ động • Nhảy cao & Súng"
+    },
+    {
+      id: "frost_blade",
+      name: "Bạch Long Kiếm Khách",
+      color: "#90e0ef",
+      accent: "#caf0f8",
+      scale: 1.03,
+      maxHp: 112,
+      moveSpeed: 5.1,
+      jumpPower: 13.2,
+      meleeWeapon: "sword",
+      meleeDamage: 17,
+      meleeReach: 70,
+      meleeCooldown: 24,
+      rangedWeapon: "bow",
+      projectileType: "arrow",
+      rangedDamage: 13,
+      rangedCooldown: 22,
+      desc: "Kiếm khí • Đều công & thủ"
+    },
+    {
+      id: "iron_paladin",
+      name: "Thép Đen Kỵ Sĩ",
+      color: "#94a3b8",
+      accent: "#f8fafc",
+      scale: 1.15,
+      maxHp: 145,
+      moveSpeed: 3.8,
+      jumpPower: 11.8,
+      meleeWeapon: "spear",
+      meleeDamage: 22,
+      meleeReach: 92,
+      meleeCooldown: 32,
+      rangedWeapon: "gun",
+      projectileType: "bullet",
+      rangedDamage: 14,
+      rangedCooldown: 26,
+      desc: "Áo giáp thép • Thương & Súng"
+    },
+    {
+      id: "shadow_ninja",
+      name: "Hắc Ảnh Nhẫn Giả",
+      color: "#9b5de5",
+      accent: "#f15bb5",
+      scale: 0.94,
+      maxHp: 88,
+      moveSpeed: 6.6,
+      jumpPower: 14.5,
+      meleeWeapon: "sword",
+      meleeDamage: 16,
+      meleeReach: 64,
+      meleeCooldown: 21,
+      rangedWeapon: "bow",
+      projectileType: "arrow",
+      rangedDamage: 14,
+      rangedCooldown: 17,
+      desc: "Tốc độ đỉnh • Kiếm & Cung nhanh"
+    },
+    {
+      id: "flame_gunner",
+      name: "Xích Liệt Pháo Thủ",
+      color: "#ff5400",
+      accent: "#ffbd00",
+      scale: 1.0,
+      maxHp: 96,
+      moveSpeed: 5.3,
+      jumpPower: 13.2,
+      meleeWeapon: "sword",
+      meleeDamage: 14,
+      meleeReach: 62,
+      meleeCooldown: 25,
+      rangedWeapon: "gun",
+      projectileType: "bullet",
+      rangedDamage: 16,
+      rangedCooldown: 22,
+      desc: "Hỏa lực súng mạnh • Kiếm & Súng"
+    },
+    {
+      id: "jade_lancer",
+      name: "Ngọc Long Giáo Thánh",
+      color: "#06d6a0",
+      accent: "#b8f2e6",
+      scale: 1.06,
+      maxHp: 118,
+      moveSpeed: 4.8,
+      jumpPower: 12.8,
+      meleeWeapon: "spear",
+      meleeDamage: 20,
+      meleeReach: 96,
+      meleeCooldown: 28,
+      rangedWeapon: "bow",
+      projectileType: "arrow",
+      rangedDamage: 14,
+      rangedCooldown: 23,
+      desc: "Giáo tầm xa • Ném giáo & Cung"
+    },
+    {
+      id: "storm_berserker",
+      name: "Bạo Phong Cuồng Chiến",
+      color: "#ef476f",
+      accent: "#ffd166",
+      scale: 1.12,
+      maxHp: 132,
+      moveSpeed: 5.5,
+      jumpPower: 13.6,
+      meleeWeapon: "sword",
+      meleeDamage: 23,
+      meleeReach: 72,
+      meleeCooldown: 24,
+      rangedWeapon: "gun",
+      projectileType: "bullet",
+      rangedDamage: 11,
+      rangedCooldown: 21,
+      desc: "Càn lướt mạnh • Máu cao & Chém rát"
+    },
+    {
+      id: "frost_archer",
+      name: "Tuyết Hồ Cung Thủ",
+      color: "#48cae4",
+      accent: "#caf0f8",
+      scale: 0.96,
+      maxHp: 94,
+      moveSpeed: 5.9,
+      jumpPower: 14.0,
+      meleeWeapon: "sword",
+      meleeDamage: 12,
+      meleeReach: 60,
+      meleeCooldown: 23,
+      rangedWeapon: "bow",
+      projectileType: "arrow",
+      rangedDamage: 15,
+      rangedCooldown: 16,
+      desc: "Bắn cung liên tục • Cơ động cao"
+    },
+    {
+      id: "void_overlord",
+      name: "Ma Tôn Hủy Diệt",
+      color: "#7209b7",
+      accent: "#4cc9f0",
+      scale: 1.28,
+      maxHp: 165,
+      moveSpeed: 3.4,
+      jumpPower: 11.5,
+      meleeWeapon: "spear",
+      meleeDamage: 25,
+      meleeReach: 100,
+      meleeCooldown: 34,
+      rangedWeapon: "gun",
+      projectileType: "bullet",
+      rangedDamage: 18,
+      rangedCooldown: 24,
+      desc: "Cự phách • Giáo dài, Ném giáo & Súng"
+    }
+  ];
+
+  const THREE_HEAD_DRAGON_PROFILE = {
+    id: "three_head_dragon",
+    name: "Rồng 3 Đầu Hỏa Ngục",
+    color: "#ff4d6d",
+    accent: "#ffd166",
+    scale: 1.48,
+    maxHp: 260,
+    moveSpeed: 3.1,
+    jumpPower: 12.2,
+    meleeWeapon: "spear",
+    meleeDamage: 22,
+    meleeReach: 112,
+    meleeCooldown: 32,
+    rangedWeapon: "bow",
+    projectileType: "dragon_fire",
+    rangedDamage: 14,
+    rangedCooldown: 28,
+    desc: "3 Đầu • Cào rồng & Khạc lửa đặc biệt"
+  };
+
+  const TITAN_INDEX = ROSTER.findIndex(c => c.id === "titan_brute");
+
+  let matchMode = "bot";
+  let gameState = "select";
+
+  let p1SelectIndex = 0;
+  let p2SelectIndex = TITAN_INDEX >= 0 ? TITAN_INDEX : 1;
+  let p1Ready = false;
+  let p2Ready = false;
+
+  const projectiles = [];
+  const particles = [];
+  const slashes = [];
+  const itemDrops = [];
+  const floatingTexts = [];
+  const afterimages = [];
+
+  const zombies = [];
+  let zombieSpawnTimer = 0;
+  let zombieWave = 1;
+  let zombieKills = 0;
+  let waveKills = 0;
+  let lastBossWave = 0;
+  let p1Level = 1;
+  let p1Xp = 0;
+  let p1XpNeed = 100;
+
+  function getWaveTargetKills(wave) {
+    return 8 + wave * 2;
+  }
+
+  function awardZombieKill(target, playerRef) {
+    if (target.countedKill) return;
+    target.countedKill = true;
+
+    zombieKills++;
+    waveKills++;
+    p1Xp += target.xpValue;
+
+    if (Math.random() < 0.35) {
+      itemDrops.push(new ItemDrop(
+              target.x + target.width / 2,
+              GROUND_Y - 10,
+              Math.random() < 0.65 ? "heal" : "tnt"
+      ));
+    }
+
+    if (p1Xp >= p1XpNeed) {
+      p1Level++;
+      p1Xp -= p1XpNeed;
+      p1XpNeed = Math.round(p1XpNeed * 1.35);
+      playerRef.maxHp += 15;
+      playerRef.hp = playerRef.maxHp;
+      playerRef.meleeDamage += 3;
+      playerRef.rangedDamage += 2;
+      playLevelUpSound();
+      spawnFloatingText(playerRef.x + playerRef.width / 2, playerRef.y - 18, `LÊN CẤP ${p1Level}!`, "#00d2ff", 15);
+      spawnHitSparks(playerRef.x + playerRef.width / 2, playerRef.y + playerRef.height / 2, "#00d2ff", 30);
+    }
+  }
+
+  class Afterimage {
+    constructor({
+                  centerX,
+                  topY,
+                  color,
+                  accent,
+                  facing,
+                  scale,
+                  walkCycle,
+                  isRanged,
+                  isAttacking,
+                  meleeWeapon,
+                  rangedWeapon,
+                  isMonster,
+                  isDragon,
+                  wingPhase
+                }) {
+      this.centerX = centerX;
+      this.topY = topY;
+      this.color = color;
+      this.accent = accent;
+      this.facing = facing;
+      this.scale = scale;
+      this.walkCycle = walkCycle;
+      this.isRanged = isRanged;
+      this.isAttacking = isAttacking;
+      this.meleeWeapon = meleeWeapon;
+      this.rangedWeapon = rangedWeapon;
+      this.isMonster = isMonster;
+      this.isDragon = isDragon;
+      this.wingPhase = wingPhase;
+      this.life = 11;
+      this.maxLife = 11;
+    }
+
+    update() {
+      this.life--;
+    }
+
+    draw() {
+      if (this.life <= 0) return;
+      const alpha = (this.life / this.maxLife) * 0.36;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      if (this.isDragon) {
+        const bodyY = this.topY + 84 * this.scale * 0.56;
+        const wingFlap = Math.sin(this.wingPhase) * 16;
+        ctx.strokeStyle = this.color;
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.ellipse(this.centerX, bodyY + 4, 23, 18, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(this.centerX - this.facing * 4, bodyY - 12);
+        ctx.lineTo(this.centerX - this.facing * 52, bodyY - 54 + wingFlap);
+        ctx.lineTo(this.centerX - this.facing * 24, bodyY + 2);
+        ctx.stroke();
+      } else {
+        drawStickmanFigure({
+          centerX: this.centerX,
+          topY: this.topY,
+          color: this.color,
+          accent: this.accent,
+          facing: this.facing,
+          scale: this.scale,
+          walkCycle: this.walkCycle,
+          isRanged: this.isRanged,
+          isAttacking: this.isAttacking,
+          meleeWeapon: this.meleeWeapon,
+          rangedWeapon: this.rangedWeapon,
+          isMonster: this.isMonster,
+          showShadow: false
+        });
+      }
+
+      ctx.restore();
+    }
+  }
+
+  class FloatingText {
+    constructor(x, y, text, color = "#ffd166", size = 14) {
+      this.x = x;
+      this.y = y;
+      this.text = text;
+      this.color = color;
+      this.size = size;
+      this.life = 42;
+      this.maxLife = 42;
+    }
+
+    update() {
+      this.y -= 0.9;
+      this.life--;
+    }
+
+    draw() {
+      if (this.life <= 0) return;
+      const alpha = Math.min(1, (this.life / this.maxLife) * 1.3);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = `bold ${this.size}px Arial`;
+      ctx.textAlign = "center";
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
+      ctx.lineWidth = 3.5;
+      ctx.strokeText(this.text, this.x, this.y);
+      ctx.fillStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 10;
+      ctx.fillText(this.text, this.x, this.y);
+      ctx.restore();
+    }
+  }
+
+  function spawnFloatingText(x, y, text, color = "#ffd166", size = 14) {
+    floatingTexts.push(new FloatingText(x, y, text, color, size));
+  }
+
+  class ItemDrop {
+    constructor(x, y, kind) {
+      this.x = Math.max(24, Math.min(canvas.width - 24, x));
+      this.y = y;
+      this.kind = kind;
+      this.size = 18;
+      this.active = true;
+      this.life = 450;
+      this.bobPhase = Math.random() * Math.PI * 2;
+    }
+
+    update(player) {
+      this.life--;
+      this.bobPhase += 0.1;
+      if (this.life <= 0) {
+        this.active = false;
+        return;
+      }
+
+      if (
+              Math.abs(this.x - (player.x + player.width / 2)) < 28 &&
+              Math.abs(this.y - (player.y + player.height / 2)) < 44
+      ) {
+        if (this.kind === "heal") {
+          playPickupSound(true);
+          player.hp = Math.min(player.maxHp, player.hp + 35);
+          spawnHitSparks(this.x, this.y, "#ff4d6d", 16);
+          spawnFloatingText(this.x, this.y - 16, "+35 HP", "#ff758f", 14);
+        } else if (this.kind === "tnt") {
+          playPickupSound(false);
+          playTntExplosionSound();
+          for (let i = zombies.length - 1; i >= 0; i--) {
+            const z = zombies[i];
+            if (Math.hypot(z.x - player.x, z.y - player.y) < 220) {
+              z.hp -= 65;
+              z.vx = (z.x >= player.x ? 1 : -1) * 12;
+              z.vy = -6;
+              z.hitFlash = 8;
+              if (z.hp <= 0) {
+                awardZombieKill(z, player);
+                zombies.splice(i, 1);
+              }
+            }
+          }
+          spawnHitSparks(this.x, this.y, "#ff9f1c", 26);
+          spawnFloatingText(this.x, this.y - 16, "NỔ TNT!", "#ff9f1c", 15);
+          triggerScreenShake(7, 10);
+        }
+        this.active = false;
+      }
+    }
+
+    draw() {
+      if (!this.active) return;
+      const bobY = this.y + Math.sin(this.bobPhase) * 3.5;
+      ctx.save();
+      ctx.shadowBlur = 14;
+      if (this.kind === "heal") {
+        ctx.fillStyle = "#ff4d6d";
+        ctx.shadowColor = "#ff4d6d";
+        ctx.beginPath();
+        ctx.arc(this.x, bobY, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 12px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("+", this.x, bobY + 4);
+      } else {
+        ctx.fillStyle = "#ff9f1c";
+        ctx.shadowColor = "#ff9f1c";
+        ctx.beginPath();
+        ctx.roundRect(this.x - 9, bobY - 9, 18, 18, 4);
+        ctx.fill();
+        ctx.strokeStyle = "#fff3b0";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = "#121629";
+        ctx.font = "bold 8.5px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("TNT", this.x, bobY + 3);
+      }
+      ctx.restore();
+    }
+  }
+
+  class ZombieEntity {
+    constructor(x, type = "normal") {
+      this.type = type;
+      this.facing = x < canvas.width / 2 ? 1 : -1;
+      this.x = x;
+      this.countedKill = false;
+
+      if (type === "boss") {
+        this.scale = 1.85;
+        this.maxHp = 450 + zombieWave * 120;
+        this.moveSpeed = 1.3;
+        this.damage = 28;
+        this.color = "#d00000";
+        this.accent = "#ffba08";
+        this.name = "BOSS ZOMBIE KHỔNG LỒ";
+        this.xpValue = 180;
+      } else if (type === "fast") {
+        this.scale = 0.88;
+        this.maxHp = 45 + zombieWave * 8;
+        this.moveSpeed = 3.6 + Math.random() * 0.5;
+        this.damage = 8;
+        this.color = "#70e000";
+        this.accent = "#ccff33";
+        this.name = "Zombie Nhanh";
+        this.xpValue = 25;
+      } else if (type === "tank") {
+        this.scale = 1.45;
+        this.maxHp = 160 + zombieWave * 35;
+        this.moveSpeed = 1.6;
+        this.damage = 22;
+        this.color = "#1b4332";
+        this.accent = "#52b788";
+        this.name = "Zombie Khổng Lồ";
+        this.xpValue = 60;
+      } else {
+        this.scale = 1.0;
+        this.maxHp = 75 + zombieWave * 15;
+        this.moveSpeed = 2.4;
+        this.damage = 12;
+        this.color = "#38b000";
+        this.accent = "#9ef01a";
+        this.name = "Zombie";
+        this.xpValue = 35;
+      }
+
+      this.hp = this.maxHp;
+      this.width = 30 * this.scale;
+      this.height = 80 * this.scale;
+      this.y = GROUND_Y - this.height;
+      this.vx = 0;
+      this.vy = 0;
+      this.isGrounded = true;
+      this.walkCycle = 0;
+      this.hitFlash = 0;
+      this.attackCooldown = 0;
+    }
+
+    update(target) {
+      if (this.hitFlash > 0) this.hitFlash--;
+      if (this.attackCooldown > 0) this.attackCooldown--;
+
+      const dx = target.x - this.x;
+      this.facing = dx >= 0 ? 1 : -1;
+      this.vx += this.facing * this.moveSpeed * 0.35;
+
+      this.x += this.vx;
+      this.y += this.vy;
+      this.vx *= 0.78;
+
+      if (this.x < -80) this.x = -80;
+      if (this.x + this.width > canvas.width + 80) this.x = canvas.width + 80 - this.width;
+
+      if (Math.abs(this.vx) > 0.3) {
+        this.walkCycle += 0.22;
+      }
+
+      if (target.y < this.y - 45 && this.isGrounded && Math.random() < 0.03) {
+        this.vy = -12;
+      }
+
+      if (this.y + this.height >= GROUND_Y) {
+        this.y = GROUND_Y - this.height;
+        this.vy = 0;
+        this.isGrounded = true;
+      } else {
+        this.vy += GRAVITY;
+        this.isGrounded = false;
+      }
+
+      const absDx = Math.abs((this.x + this.width / 2) - (target.x + target.width / 2));
+      const absDy = Math.abs(this.y - target.y);
+      if (absDx < (this.width / 2 + target.width / 2 + 8) && absDy < 45 && this.attackCooldown <= 0) {
+        target.hp = Math.max(0, target.hp - this.damage);
+        target.vx = this.facing * (this.type === "boss" ? 12 : 7);
+        target.vy = this.type === "boss" ? -6 : -3;
+        target.hitFlash = 6;
+        this.attackCooldown = this.type === "boss" ? 48 : 38;
+        playHitSound(this.type === "boss");
+        spawnHitSparks(target.x + target.width / 2, target.y + target.height / 2, "#38b000", 12);
+      }
+    }
+
+    draw() {
+      drawStickmanFigure({
+        centerX: this.x + this.width / 2,
+        topY: this.y,
+        color: this.hitFlash > 0 ? "#ffffff" : this.color,
+        accent: this.accent,
+        facing: this.facing,
+        scale: this.scale,
+        walkCycle: this.walkCycle,
+        isRanged: false,
+        isAttacking: false,
+        meleeWeapon: "sword",
+        isMonster: this.type === "boss",
+        showShadow: true
+      });
+
+      if (this.hp < this.maxHp && this.type !== "boss") {
+        ctx.fillStyle = "rgba(0,0,0,0.65)";
+        ctx.fillRect(this.x, this.y - 12, this.width, 5);
+        ctx.fillStyle = "#ff595e";
+        ctx.fillRect(this.x, this.y - 12, Math.max(0, (this.hp / this.maxHp) * this.width), 5);
+      }
+    }
+  }
+
+  function spawnZombieWaveLogic() {
+    if (zombieWave % 5 === 0 && lastBossWave !== zombieWave) {
+      zombies.push(new ZombieEntity(canvas.width + 20, "boss"));
+      playDragonFireSound(true);
+      spawnFloatingText(canvas.width / 2, 130, `BOSS ZOMBIE ĐỢT ${zombieWave} XUẤT HIỆN!`, "#ff4d6d", 18);
+      triggerScreenShake(9, 12);
+      lastBossWave = zombieWave;
+    }
+
+    const maxActiveZombies = Math.min(12, 4 + zombieWave);
+    if (zombieSpawnTimer <= 0 && zombies.length < maxActiveZombies) {
+      zombieSpawnTimer = Math.max(45, 140 - zombieWave * 10);
+      const spawnX = Math.random() < 0.5 ? -40 : canvas.width + 10;
+      const rand = Math.random();
+      let zType = "normal";
+      if (rand < 0.25) zType = "fast";
+      else if (rand > 0.8) zType = "tank";
+
+      zombies.push(new ZombieEntity(spawnX, zType));
+    } else {
+      zombieSpawnTimer--;
+    }
+  }
+
+  class Particle {
+    constructor(x, y, vx, vy, color, size, life, gravity = 0.22) {
+      this.x = x;
+      this.y = y;
+      this.vx = vx;
+      this.vy = vy;
+      this.color = color;
+      this.size = size;
+      this.life = life;
+      this.maxLife = life;
+      this.gravity = gravity;
+    }
+
+    update() {
+      this.x += this.vx;
+      this.y += this.vy;
+      this.vy += this.gravity;
+      this.vx *= 0.96;
+      this.life--;
+    }
+
+    draw() {
+      if (this.life <= 0) return;
+      const alpha = Math.max(0, this.life / this.maxLife);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, Math.max(0.5, this.size * alpha), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  class SlashEffect {
+    constructor(x, y, facing, reach, color, isSpear) {
+      this.x = x;
+      this.y = y;
+      this.facing = facing;
+      this.reach = reach;
+      this.color = color;
+      this.isSpear = isSpear;
+      this.life = 9;
+      this.maxLife = 9;
+    }
+
+    update() {
+      this.life--;
+    }
+
+    draw() {
+      if (this.life <= 0) return;
+      const alpha = this.life / this.maxLife;
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.95;
+      ctx.strokeStyle = this.color;
+      ctx.shadowColor = this.color;
+      ctx.shadowBlur = 22;
+      ctx.lineCap = "round";
+
+      if (this.isSpear) {
+        ctx.lineWidth = 7 * alpha;
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y);
+        ctx.lineTo(this.x + this.facing * this.reach, this.y);
+        ctx.stroke();
+
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2.5 * alpha;
+        ctx.beginPath();
+        ctx.moveTo(this.x + this.facing * (this.reach * 0.25), this.y);
+        ctx.lineTo(this.x + this.facing * this.reach, this.y);
+        ctx.stroke();
+      } else {
+        ctx.lineWidth = 9.5 * alpha;
+        ctx.beginPath();
+        const startAngle = this.facing === 1 ? -0.85 : Math.PI + 0.85;
+        const endAngle = this.facing === 1 ? 0.55 : Math.PI - 0.55;
+        ctx.arc(this.x, this.y, this.reach * 0.88, startAngle, endAngle, this.facing === -1);
+        ctx.stroke();
+
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+        ctx.lineWidth = 3 * alpha;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.reach * 0.88, startAngle, endAngle, this.facing === -1);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  function spawnHitSparks(x, y, color, count = 12) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 5.5;
+      particles.push(new Particle(
+              x, y,
+              Math.cos(angle) * speed,
+              Math.sin(angle) * speed - 1.5,
+              i % 2 === 0 ? color : "#fff3b0",
+              2.5 + Math.random() * 3,
+              16 + Math.floor(Math.random() * 12)
+      ));
+    }
+  }
+
+  function spawnMonsterAura(x, y, w, h, color) {
+    for (let i = 0; i < 24; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.8 + Math.random() * 5;
+      particles.push(new Particle(
+              x + w / 2 + (Math.random() - 0.5) * w,
+              y + h / 2 + (Math.random() - 0.5) * h,
+              Math.cos(angle) * speed,
+              Math.sin(angle) * speed - 2,
+              i % 2 === 0 ? "#c77dff" : color,
+              3 + Math.random() * 3.5,
+              20 + Math.floor(Math.random() * 12)
+      ));
+    }
+  }
+
+  function spawnArenaAmbient() {
+    const arena = ARENAS[currentArenaIndex];
+    if (Math.random() < 0.35) {
+      if (arena.id === "ice_valley") {
+        particles.push(new Particle(
+                Math.random() * canvas.width, -5,
+                (Math.random() - 0.5) * 0.9, 1.1 + Math.random() * 1.2,
+                arena.ambientParticle, 2.3, 130, 0
+        ));
+      } else if (arena.id === "volcano_forge") {
+        particles.push(new Particle(
+                Math.random() * canvas.width, GROUND_Y,
+                (Math.random() - 0.5) * 1.5, -1.3 - Math.random() * 1.6,
+                arena.ambientParticle, 2.5, 75, -0.01
+        ));
+      } else {
+        particles.push(new Particle(
+                Math.random() * canvas.width, GROUND_Y - 10 - Math.random() * 160,
+                (Math.random() - 0.5) * 0.5, -0.25 - Math.random() * 0.35,
+                arena.ambientParticle, 1.7, 95, 0
+        ));
+      }
+    }
+  }
+
+  class Projectile {
+    constructor({
+                  x,
+                  y,
+                  direction,
+                  owner,
+                  type,
+                  damage,
+                  color,
+                  scale = 1,
+                  fast = false,
+                  isMonster = false,
+                  vy = 0,
+                  isSpecial = false
+                }) {
+      this.x = x;
+      this.y = y;
+      this.direction = direction;
+      this.owner = owner;
+      this.type = type;
+      this.damage = damage;
+      this.color = color;
+      this.scale = scale;
+      this.isMonster = isMonster;
+      this.vy = vy;
+      this.isSpecial = isSpecial;
+      this.hitIds = new Set();
+
+      if (type === "thrown_spear") {
+        this.speed = scale > 1.2 ? 10.5 : 12.5;
+        this.width = 56 * Math.max(1, scale * 0.92);
+        this.height = 8 * Math.max(1, scale * 0.92);
+      } else if (type === "dragon_fire") {
+        this.speed = isSpecial ? 11.5 : 10.5;
+        this.width = isSpecial ? 32 : 24;
+        this.height = isSpecial ? 24 : 18;
+      } else {
+        this.speed = type === "bullet" ? (fast ? 14 : 12) : (fast ? 11 : 9.2);
+        this.width = (type === "bullet" ? 12 : 24) * Math.max(1, scale * 0.9);
+        this.height = (type === "bullet" ? 5 : 5) * Math.max(1, scale * 0.9);
+      }
+      this.active = true;
+    }
+
+    update(targetList) {
+      this.x += this.direction * this.speed;
+      this.y += this.vy;
+
+      if (Math.random() < (this.isSpecial ? 0.9 : 0.65)) {
+        particles.push(new Particle(
+                this.x + (this.direction === 1 ? 0 : this.width),
+                this.y + this.height / 2,
+                -this.direction * (1 + Math.random() * 1.8),
+                (Math.random() - 0.5) * 1.6,
+                this.isSpecial ? "#ff4d6d" : (this.type === "dragon_fire" ? "#ff9f1c" : (this.type === "thrown_spear" ? (this.isMonster ? "#e0aaff" : "#ffd166") : (this.isMonster ? "#e0aaff" : (this.type === "bullet" ? "#ffeaa7" : "#f39c12")))),
+                this.isSpecial ? 4.5 : (this.type === "dragon_fire" ? 3.5 : (this.type === "thrown_spear" ? 2.8 : 2.2)), 10
+        ));
+      }
+
+      const targets = Array.isArray(targetList) ? targetList : [targetList];
+      for (let idx = targets.length - 1; idx >= 0; idx--) {
+        const target = targets[idx];
+        if (!target || this.hitIds.has(target)) continue;
+        if (
+                this.x < target.x + target.width &&
+                this.x + this.width > target.x &&
+                this.y < target.y + target.height &&
+                this.y + this.height > target.y
+        ) {
+          this.hitIds.add(target);
+          target.hp = Math.max(0, target.hp - this.damage);
+          playHitSound(this.isSpecial || this.type === "thrown_spear");
+          const knockX = this.isSpecial ? 14 : (this.type === "dragon_fire" ? 9 : (this.type === "thrown_spear" ? 11 : (this.isMonster ? 8.5 : (this.scale > 1.2 ? 7 : 5))));
+          const knockY = this.isSpecial ? -6.5 : (this.type === "dragon_fire" ? -4.5 : (this.type === "thrown_spear" ? -5.5 : (this.isMonster ? -4.5 : (this.scale > 1.2 ? -3.5 : -2))));
+          target.vx = this.direction * knockX;
+          target.vy = knockY;
+          target.hitFlash = 7;
+          spawnHitSparks(this.x + this.width / 2, this.y + this.height / 2, this.isSpecial ? "#ff9f1c" : (this.type === "dragon_fire" ? "#ff4d6d" : (this.isMonster ? "#c77dff" : (this.type === "thrown_spear" ? "#ffd166" : this.color))), this.isSpecial ? 24 : 15);
+          if (this.isSpecial) {
+            spawnFloatingText(target.x + target.width / 2, target.y - 12, `-${this.damage} HỎA NGỤC!`, "#ff9f1c", 14);
+            triggerScreenShake(9, 12);
+          }
+
+          if (target instanceof ZombieEntity && target.hp <= 0) {
+            awardZombieKill(target, this.owner || player1);
+            targets.splice(idx, 1);
+          }
+
+          if (this.type !== "thrown_spear") {
+            this.active = false;
+            return;
+          }
+        }
+      }
+
+      if (this.x < -120 || this.x > canvas.width + 120 || this.y < -60 || this.y > GROUND_Y + 20) {
+        this.active = false;
+      }
+    }
+
+    draw() {
+      ctx.save();
+      const s = Math.max(1, this.scale * 0.92);
+      if (this.type === "dragon_fire") {
+        ctx.fillStyle = this.isSpecial ? "#ff2a55" : "#ff5400";
+        ctx.shadowColor = this.isSpecial ? "#ffd166" : "#ff9f1c";
+        ctx.shadowBlur = this.isSpecial ? 26 : 16;
+        ctx.beginPath();
+        ctx.ellipse(this.x + this.width / 2, this.y + this.height / 2, this.isSpecial ? 17 : 13, this.isSpecial ? 12 : 8, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#fff3b0";
+        ctx.beginPath();
+        ctx.arc(this.x + this.width / 2 + this.direction * 3, this.y + this.height / 2, this.isSpecial ? 7.5 : 5, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (this.type === "thrown_spear") {
+        const tailX = this.x;
+        const midY = this.y + this.height / 2;
+        const shaftEndX = this.x + this.direction * 42 * s;
+        const tipX = this.x + this.direction * 56 * s;
+
+        ctx.strokeStyle = this.isMonster ? "#c77dff" : "#e07a5f";
+        ctx.shadowColor = this.isMonster ? "#c77dff" : "#ffd166";
+        ctx.shadowBlur = 14;
+        ctx.lineWidth = 4.2 * s;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(tailX, midY);
+        ctx.lineTo(shaftEndX, midY);
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.moveTo(tipX, midY);
+        ctx.lineTo(shaftEndX, midY - 6 * s);
+        ctx.lineTo(shaftEndX, midY + 6 * s);
+        ctx.closePath();
+        ctx.fill();
+      } else if (this.type === "bullet") {
+        ctx.fillStyle = this.isMonster ? "#f3d5ff" : "#fff3b0";
+        ctx.shadowColor = this.isMonster ? "#c77dff" : "#ffd166";
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.roundRect(this.x, this.y, this.width, this.height, 2);
+        ctx.fill();
+      } else if (this.type === "arrow") {
+        ctx.strokeStyle = this.isMonster ? "#e0aaff" : (this.scale > 1.2 ? "#ff7675" : "#f39c12");
+        ctx.shadowColor = this.isMonster ? "#9d4edd" : "#f39c12";
+        ctx.shadowBlur = 12;
+        ctx.lineWidth = 3 * s;
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y + this.height / 2);
+        ctx.lineTo(this.x + this.direction * 18 * s, this.y + this.height / 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = this.isMonster ? "#ff4d6d" : this.color;
+        ctx.lineWidth = 2 * s;
+        ctx.beginPath();
+        ctx.moveTo(this.x, this.y + this.height / 2);
+        ctx.lineTo(this.x - this.direction * 5 * s, this.y);
+        ctx.moveTo(this.x, this.y + this.height / 2);
+        ctx.lineTo(this.x - this.direction * 5 * s, this.y + this.height);
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        let tipX = this.x + this.direction * 24 * s;
+        let midY = this.y + this.height / 2;
+        ctx.moveTo(tipX, midY);
+        ctx.lineTo(tipX - this.direction * 7 * s, midY - 3 * s);
+        ctx.lineTo(tipX - this.direction * 7 * s, midY + 3 * s);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  class Stickman {
+    constructor({x, y, facing, profile, isBot = false, isThreeHeadDragon = false}) {
+      this.profile = profile;
+      this.isThreeHeadDragon = isThreeHeadDragon;
+      this.baseScale = profile.scale || 1;
+      this.isMonster = false;
+      this.monsterCooldown = 0;
+
+      this.scale = this.baseScale;
+      this.width = 36 * this.scale;
+      this.height = 84 * this.scale;
+
+      this.startX = x;
+      this.x = x;
+      this.y = y !== undefined ? y : GROUND_Y - this.height;
+      this.vx = 0;
+      this.vy = 0;
+      this.facing = facing;
+      this.isBot = isBot;
+
+      this.name = profile.name;
+      this.baseColor = profile.color;
+      this.color = profile.color;
+      this.accent = profile.accent || "#ffffff";
+      this.baseMaxHp = profile.maxHp;
+      this.maxHp = profile.maxHp;
+      this.hp = profile.maxHp;
+      this.baseMoveSpeed = profile.moveSpeed;
+      this.moveSpeed = profile.moveSpeed;
+      this.jumpPower = profile.jumpPower;
+      this.meleeWeapon = profile.meleeWeapon;
+      this.baseMeleeDamage = profile.meleeDamage;
+      this.meleeDamage = profile.meleeDamage;
+      this.meleeReach = profile.meleeReach;
+      this.meleeCooldown = profile.meleeCooldown || 26;
+      this.rangedWeapon = profile.rangedWeapon;
+      this.projectileType = profile.projectileType;
+      this.baseRangedDamage = profile.rangedDamage;
+      this.rangedDamage = profile.rangedDamage;
+      this.rangedCooldown = profile.rangedCooldown;
+
+      this.isRanged = false;
+      this.isGrounded = false;
+      this.isAttacking = false;
+      this.attackCooldown = 0;
+      this.throwCooldown = 0;
+      this.specialCooldown = 140;
+      this.specialBreathTimer = 0;
+      this.attackFrame = 0;
+      this.walkCycle = 0;
+      this.hitFlash = 0;
+      this.wingPhase = 0;
+      this.afterimageTick = 0;
+
+      this.aiDecisionTimer = 0;
+      this.aiDesiredDir = 0;
+    }
+
+    canThrowSpear() {
+      return !this.isThreeHeadDragon && !this.isRanged && this.meleeWeapon === "spear";
+    }
+
+    throwSpear() {
+      if (!this.canThrowSpear() || this.throwCooldown > 0) return;
+
+      this.isAttacking = true;
+      this.attackFrame = 10;
+      this.throwCooldown = this.scale > 1.2 ? 52 : 38;
+      playSlashSound();
+
+      const throwDamage = Math.round(this.meleeDamage * 1.25);
+      const spawnX = this.facing === 1 ? this.x + this.width + 18 * this.scale : this.x - 62 * this.scale;
+      const spawnY = this.y + 30 * this.scale;
+
+      spawnHitSparks(spawnX + 10, spawnY + 4, this.isMonster ? "#e0aaff" : "#ffd166", 7);
+
+      projectiles.push(new Projectile({
+        x: spawnX,
+        y: spawnY,
+        direction: this.facing,
+        owner: this,
+        type: "thrown_spear",
+        damage: throwDamage,
+        color: this.color,
+        scale: this.scale,
+        isMonster: this.isMonster
+      }));
+    }
+
+    triggerDragonSpecialBreath() {
+      if (!this.isThreeHeadDragon || this.specialCooldown > 0) return;
+
+      this.isAttacking = true;
+      this.attackFrame = 16;
+      this.attackCooldown = 36;
+      this.specialCooldown = 260;
+      this.specialBreathTimer = 18;
+      playDragonFireSound(true);
+
+      triggerScreenShake(12, 16);
+      spawnFloatingText(this.x + this.width / 2, this.y - 16, "3 ĐẦU KHẠC LỬA ĐẶC BIỆT!", "#ffd166", 15);
+
+      const baseX = this.facing === 1 ? this.x + this.width + 20 : this.x - 32;
+      const baseY = this.y + 34;
+      const spreadVys = [-2.2, 0, 2.2];
+      const offsetsY = [-16, 0, 16];
+
+      for (let i = 0; i < 3; i++) {
+        projectiles.push(new Projectile({
+          x: baseX,
+          y: baseY + offsetsY[i],
+          direction: this.facing,
+          owner: this,
+          type: "dragon_fire",
+          damage: Math.round(this.rangedDamage * 1.65),
+          color: "#ff9f1c",
+          scale: this.scale,
+          isMonster: true,
+          vy: spreadVys[i],
+          isSpecial: true
+        }));
+      }
+
+      spawnHitSparks(this.x + this.width / 2 + this.facing * 26, baseY, "#ff9f1c", 24);
+    }
+
+    applySizeScale(newScale) {
+      const oldBottom = this.y + this.height;
+      this.scale = newScale;
+      this.width = 36 * this.scale;
+      this.height = 84 * this.scale;
+      this.y = Math.min(GROUND_Y - this.height, oldBottom - this.height);
+      this.x = Math.max(10, Math.min(canvas.width - 10 - this.width, this.x));
+    }
+
+    toggleMonsterForm() {
+      if (!this.isMonster && this.monsterCooldown > 0) return;
+
+      this.isMonster = !this.isMonster;
+      if (this.isMonster) {
+        this.applySizeScale(Math.min(1.75, this.baseScale * 1.25));
+        this.color = "#ff0055";
+        this.accent = "#ffe66d";
+        this.maxHp = this.baseMaxHp + MONSTER_BONUS_HP;
+        this.hp = Math.min(this.maxHp, this.hp + MONSTER_BONUS_HP);
+        this.meleeDamage = Math.round(this.baseMeleeDamage * 1.45);
+        this.rangedDamage = Math.round(this.baseRangedDamage * 1.4);
+        this.hitFlash = 8;
+        playDragonFireSound(false);
+        spawnFloatingText(this.x + this.width / 2, this.y - 16, "HÓA QUÁI!", "#ff4d6d", 15);
+        triggerScreenShake(9, 12);
+      } else {
+        this.applySizeScale(this.baseScale);
+        this.color = this.baseColor;
+        this.accent = this.profile.accent || "#ffffff";
+        this.maxHp = this.baseMaxHp;
+        this.hp = Math.min(this.maxHp, this.hp);
+        this.meleeDamage = this.baseMeleeDamage;
+        this.rangedDamage = this.baseRangedDamage;
+        this.monsterCooldown = 180;
+      }
+
+      spawnMonsterAura(this.x, this.y, this.width, this.height, this.color);
+    }
+
+    switchWeapon() {
+      this.isRanged = !this.isRanged;
+      this.isAttacking = false;
+      this.attackCooldown = 10;
+      playSlashSound();
+      spawnHitSparks(this.x + this.width / 2, this.y + this.height * 0.45, this.color, 6);
+    }
+
+    attack() {
+      if (this.attackCooldown > 0 || this.isAttacking) return;
+
+      if (this.isThreeHeadDragon) {
+        this.isAttacking = true;
+        this.attackFrame = 12;
+        this.attackCooldown = 26;
+
+        if (this.isRanged) {
+          playDragonFireSound(false);
+          const offsets = [-14, 0, 14];
+          for (let dy of offsets) {
+            const spawnX = this.facing === 1 ? this.x + this.width + 18 : this.x - 28;
+            const spawnY = this.y + 34 + dy;
+            projectiles.push(new Projectile({
+              x: spawnX,
+              y: spawnY,
+              direction: this.facing,
+              owner: this,
+              type: "dragon_fire",
+              damage: this.rangedDamage,
+              color: "#ff9f1c",
+              scale: this.scale,
+              isMonster: true
+            }));
+          }
+          spawnHitSparks(this.x + this.width / 2 + this.facing * 24, this.y + 34, "#ff9f1c", 10);
+          triggerScreenShake(4.5, 6);
+        } else {
+          playSlashSound();
+          slashes.push(new SlashEffect(
+                  this.x + this.width / 2 + this.facing * 20,
+                  this.y + 42,
+                  this.facing,
+                  this.meleeReach,
+                  "#ff4d6d",
+                  false
+          ));
+          triggerScreenShake(7.5, 9);
+        }
+        return;
+      }
+
+      if (this.isRanged) {
+        this.isAttacking = true;
+        this.attackFrame = this.scale > 1.2 ? 11 : 8;
+        this.attackCooldown = this.rangedCooldown;
+        playGunSound(this.projectileType === "arrow");
+
+        let spawnX = this.facing === 1 ? this.x + this.width + 22 * this.scale : this.x - 28 * this.scale;
+        let spawnY = this.y + 32 * this.scale;
+
+        spawnHitSparks(spawnX, spawnY + 3, this.isMonster ? "#e0aaff" : "#ffeaa7", 5);
+
+        projectiles.push(new Projectile({
+          x: spawnX,
+          y: spawnY,
+          direction: this.facing,
+          owner: this,
+          type: this.projectileType,
+          damage: this.rangedDamage,
+          color: this.color,
+          scale: this.scale,
+          fast: this.profile.id === "green_assassin" || this.profile.id === "shadow_reaper" || this.profile.id === "shadow_ninja" || this.profile.id === "frost_archer",
+          isMonster: this.isMonster
+        }));
+      } else {
+        this.isAttacking = true;
+        this.attackFrame = this.scale > 1.2 ? 16 : 12;
+        this.attackCooldown = this.meleeCooldown;
+        playSlashSound();
+
+        slashes.push(new SlashEffect(
+                this.x + this.width / 2 + this.facing * 18 * this.scale,
+                this.y + 36 * this.scale,
+                this.facing,
+                this.meleeReach * (this.isMonster ? 1.18 : 1),
+                this.color,
+                this.meleeWeapon === "spear"
+        ));
+      }
+    }
+
+    getWeaponHitbox() {
+      let reach = this.meleeReach * (this.isMonster ? 1.18 : 1);
+      let hitX = this.facing === 1 ? this.x + this.width : this.x - reach;
+      return {
+        x: hitX,
+        y: this.y + 14 * this.scale,
+        width: reach,
+        height: 46 * this.scale
+      };
+    }
+
+    updateBotAI(opponent) {
+      if (!opponent) return 7;
+      const dx = opponent.x - this.x;
+      const absDx = Math.abs(dx);
+      const dy = opponent.y - this.y;
+
+      this.facing = dx >= 0 ? 1 : -1;
+
+      if (!this.isMonster && this.monsterCooldown <= 0 && this.hp < this.maxHp * 0.5 && Math.random() < 0.03) {
+        this.toggleMonsterForm();
+      }
+
+      if (this.isThreeHeadDragon && this.specialCooldown <= 0 && absDx >= 130 && Math.random() < 0.08) {
+        this.triggerDragonSpecialBreath();
+        return 7;
+      }
+
+      if (this.aiDecisionTimer <= 0) {
+        this.aiDecisionTimer = 15 + Math.floor(Math.random() * 14);
+        if (absDx < 140) {
+          this.isRanged = false;
+          this.aiDesiredDir = dx >= 0 ? 1 : -1;
+        } else if (absDx > 240) {
+          this.isRanged = Math.random() < 0.75;
+          this.aiDesiredDir = dx >= 0 ? 1 : -1;
+        } else {
+          this.aiDesiredDir = dx >= 0 ? 1 : -1;
+        }
+      } else {
+        this.aiDecisionTimer--;
+      }
+
+      if (this.aiDesiredDir !== 0 && absDx > 95) {
+        this.vx += this.aiDesiredDir * this.moveSpeed * 0.35;
+      }
+
+      if (this.isGrounded && dy < -45 && absDx < 220 && Math.random() < 0.05) {
+        this.vy = -this.jumpPower;
+        playJumpSound();
+      }
+
+      if (!this.isRanged && absDx <= this.meleeReach + 12) {
+        this.attack();
+      } else if (this.isRanged && absDx >= 100 && Math.random() < 0.1) {
+        this.attack();
+      }
+      return 7;
+    }
+
+    update(targetList) {
+      if (this.hitFlash > 0) this.hitFlash--;
+      if (this.monsterCooldown > 0) this.monsterCooldown--;
+      if (this.throwCooldown > 0) this.throwCooldown--;
+      if (this.specialCooldown > 0) this.specialCooldown--;
+      if (this.specialBreathTimer > 0) this.specialBreathTimer--;
+      this.wingPhase += 0.14;
+
+      let hitFrame = this.isThreeHeadDragon ? 7 : (this.scale > 1.2 ? 9 : 6);
+      if (this.isBot && !Array.isArray(targetList)) {
+        hitFrame = this.updateBotAI(targetList);
+      }
+
+      if (this.attackCooldown > 0) this.attackCooldown--;
+
+      if (this.isAttacking) {
+        this.attackFrame--;
+        if (!this.isRanged && this.attackFrame === hitFrame) {
+          let hitbox = this.getWeaponHitbox();
+          const targets = Array.isArray(targetList) ? targetList : [targetList];
+
+          for (let idx = targets.length - 1; idx >= 0; idx--) {
+            const opponent = targets[idx];
+            if (!opponent) continue;
+            if (
+                    hitbox.x < opponent.x + opponent.width &&
+                    hitbox.x + hitbox.width > opponent.x &&
+                    hitbox.y < opponent.y + opponent.height &&
+                    hitbox.y + hitbox.height > opponent.y
+            ) {
+              opponent.hp = Math.max(0, opponent.hp - this.meleeDamage);
+              playHitSound(this.isThreeHeadDragon || this.isMonster || this.scale > 1.2);
+              const knockX = this.isThreeHeadDragon ? 13 : (this.isMonster ? 13 : 8);
+              const knockY = this.isThreeHeadDragon ? -6.5 : (this.isMonster ? -7 : -4);
+              opponent.vx = this.facing * knockX;
+              opponent.vy = knockY;
+              opponent.hitFlash = 7;
+              spawnHitSparks(opponent.x + opponent.width / 2, opponent.y + opponent.height * 0.45, this.color, 18);
+              if (this.isThreeHeadDragon || this.isMonster) {
+                triggerScreenShake(8, 10);
+              }
+
+              if (opponent instanceof ZombieEntity && opponent.hp <= 0) {
+                awardZombieKill(opponent, this);
+                targets.splice(idx, 1);
+              }
+            }
+          }
+        }
+        if (this.attackFrame <= 0) this.isAttacking = false;
+      }
+
+      this.x += this.vx;
+      this.y += this.vy;
+      this.vx *= 0.78;
+
+      if (Math.abs(this.vx) > 0.35 && this.isGrounded) {
+        this.walkCycle += 0.22;
+      } else {
+        this.walkCycle = 0;
+      }
+
+      if (this.y + this.height >= GROUND_Y) {
+        this.y = GROUND_Y - this.height;
+        this.vy = 0;
+        this.isGrounded = true;
+      } else {
+        this.vy += GRAVITY;
+        this.isGrounded = false;
+      }
+
+      const speedMag = Math.hypot(this.vx, this.vy);
+      if ((!this.isGrounded && speedMag > 2.2) || Math.abs(this.vx) > 4.2) {
+        this.afterimageTick++;
+        if (this.afterimageTick % 2 === 0) {
+          afterimages.push(new Afterimage({
+            centerX: this.x + this.width / 2,
+            topY: this.y,
+            color: this.color,
+            accent: this.accent,
+            facing: this.facing,
+            scale: this.scale,
+            walkCycle: this.walkCycle,
+            isRanged: this.isRanged,
+            isAttacking: this.isAttacking,
+            meleeWeapon: this.meleeWeapon,
+            rangedWeapon: this.rangedWeapon,
+            isMonster: this.isMonster,
+            isDragon: this.isThreeHeadDragon,
+            wingPhase: this.wingPhase
+          }));
+        }
+      } else {
+        this.afterimageTick = 0;
+      }
+
+      if (this.x < 10) this.x = 10;
+      if (this.x + this.width > canvas.width - 10) this.x = canvas.width - 10 - this.width;
+    }
+
+    drawThreeHeadDragon() {
+      const cx = this.x + this.width / 2;
+      const bodyY = this.y + this.height * 0.56;
+      const bottomY = this.y + this.height;
+      const f = this.facing;
+      const mainColor = this.hitFlash > 0 ? "#ffffff" : this.color;
+      const hornColor = this.accent;
+
+      ctx.save();
+      ctx.fillStyle = "rgba(0, 0, 0, 0.52)";
+      ctx.beginPath();
+      ctx.ellipse(cx, GROUND_Y + 3, 44, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (this.specialCooldown <= 0) {
+        ctx.strokeStyle = "rgba(255, 209, 102, 0.65)";
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.ellipse(cx, GROUND_Y + 3, 50 + Math.sin(this.wingPhase * 2) * 3, 10.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      ctx.shadowColor = this.specialBreathTimer > 0 ? "#ff9f1c" : (this.isMonster ? "#ff0055" : "#ff5400");
+      ctx.shadowBlur = this.specialBreathTimer > 0 ? 30 : (this.isMonster ? 26 : 18);
+
+      const wingFlap = Math.sin(this.wingPhase) * 16;
+      const wingTipX = cx - f * 52;
+      const wingTipY = bodyY - 54 + wingFlap;
+      const wingMidX = cx - f * 34;
+      const wingMidY = bodyY - 22 + wingFlap * 0.6;
+
+      const wingGrad = ctx.createLinearGradient(cx, bodyY - 12, wingTipX, wingTipY);
+      wingGrad.addColorStop(0, "rgba(255, 77, 109, 0.68)");
+      wingGrad.addColorStop(1, "rgba(255, 159, 28, 0.2)");
+
+      ctx.fillStyle = wingGrad;
+      ctx.strokeStyle = mainColor;
+      ctx.lineWidth = 2.8;
+      ctx.beginPath();
+      ctx.moveTo(cx - f * 4, bodyY - 12);
+      ctx.lineTo(wingTipX, wingTipY);
+      ctx.lineTo(wingMidX, wingMidY + 8);
+      ctx.lineTo(cx - f * 24, bodyY + 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.strokeStyle = hornColor;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - f * 8, bodyY - 10);
+      ctx.lineTo(wingMidX, wingMidY);
+      ctx.moveTo(cx - f * 12, bodyY - 6);
+      ctx.lineTo(cx - f * 30, bodyY - 6 + wingFlap * 0.4);
+      ctx.stroke();
+
+      const tailWag = Math.cos(this.wingPhase) * 9;
+      const tailEndX = cx - f * 58;
+      const tailEndY = bodyY + 6 + tailWag;
+
+      ctx.strokeStyle = mainColor;
+      ctx.lineWidth = 5.5;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(cx - f * 14, bodyY + 12);
+      ctx.quadraticCurveTo(cx - f * 38, bodyY + 20 + tailWag, tailEndX, tailEndY);
+      ctx.stroke();
+
+      ctx.fillStyle = hornColor;
+      ctx.beginPath();
+      ctx.moveTo(tailEndX, tailEndY);
+      ctx.lineTo(tailEndX - f * 12, tailEndY - 5 + tailWag * 0.3);
+      ctx.lineTo(tailEndX - f * 8, tailEndY + 5);
+      ctx.closePath();
+      ctx.fill();
+
+      const legSwing = Math.sin(this.walkCycle) * 11;
+      ctx.strokeStyle = mainColor;
+      ctx.lineWidth = 5.5;
+      ctx.beginPath();
+      ctx.moveTo(cx - 10, bodyY + 15);
+      ctx.lineTo(cx - 18 + legSwing, bottomY);
+      ctx.moveTo(cx + 10, bodyY + 15);
+      ctx.lineTo(cx + 16 - legSwing, bottomY);
+      ctx.stroke();
+
+      ctx.strokeStyle = hornColor;
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(cx - 18 + legSwing, bottomY);
+      ctx.lineTo(cx - 12 + legSwing, bottomY);
+      ctx.moveTo(cx + 16 - legSwing, bottomY);
+      ctx.lineTo(cx + 22 - legSwing, bottomY);
+      ctx.stroke();
+
+      const bodyGrad = ctx.createRadialGradient(cx, bodyY, 4, cx, bodyY + 4, 26);
+      bodyGrad.addColorStop(0, "rgba(255, 159, 28, 0.42)");
+      bodyGrad.addColorStop(1, "rgba(255, 77, 109, 0.28)");
+
+      ctx.fillStyle = bodyGrad;
+      ctx.strokeStyle = mainColor;
+      ctx.lineWidth = 3.2;
+      ctx.beginPath();
+      ctx.ellipse(cx, bodyY + 4, 23, 18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = hornColor;
+      for (let i = -1; i <= 1; i++) {
+        const sx = cx + i * 9;
+        const sy = bodyY - 13;
+        ctx.beginPath();
+        ctx.moveTo(sx - 4, sy);
+        ctx.lineTo(sx, sy - 9);
+        ctx.lineTo(sx + 4, sy);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      const heads = [
+        {dx: f * 26, dy: -24, bob: Math.sin(this.wingPhase) * 3.5, scale: 0.95},
+        {dx: f * 35, dy: -4, bob: Math.cos(this.wingPhase) * 3.5, scale: 1.08},
+        {dx: f * 24, dy: 16, bob: Math.sin(this.wingPhase + 1.5) * 3.5, scale: 0.95}
+      ];
+
+      for (let h of heads) {
+        const hx = cx + h.dx + (this.isAttacking ? f * 11 : 0);
+        const hy = bodyY + h.dy + h.bob;
+        const hs = h.scale;
+
+        ctx.strokeStyle = mainColor;
+        ctx.lineWidth = 5 * hs;
+        ctx.beginPath();
+        ctx.moveTo(cx + f * 8, bodyY + h.dy * 0.25);
+        ctx.quadraticCurveTo(cx + f * 20, bodyY + h.dy * 0.7, hx - f * 4, hy);
+        ctx.stroke();
+
+        ctx.strokeStyle = hornColor;
+        ctx.lineWidth = 2.6 * hs;
+        ctx.beginPath();
+        ctx.moveTo(hx - f * 2, hy - 5 * hs);
+        ctx.lineTo(hx - f * 12 * hs, hy - 15 * hs);
+        ctx.moveTo(hx - f * 6 * hs, hy - 4 * hs);
+        ctx.lineTo(hx - f * 15 * hs, hy - 10 * hs);
+        ctx.stroke();
+
+        ctx.fillStyle = mainColor;
+        ctx.beginPath();
+        ctx.ellipse(hx, hy, 11 * hs, 8 * hs, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.moveTo(hx + f * 4 * hs, hy - 4 * hs);
+        ctx.lineTo(hx + f * 15 * hs, hy - 1 * hs);
+        ctx.lineTo(hx + f * 4 * hs, hy + 4 * hs);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = "#fff3b0";
+        ctx.shadowColor = "#ffd166";
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(hx + f * 4 * hs, hy - 2 * hs, 2.8 * hs, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        if (this.specialBreathTimer > 0) {
+          ctx.fillStyle = "#ffd166";
+          ctx.shadowColor = "#ff5400";
+          ctx.shadowBlur = 16;
+          ctx.beginPath();
+          ctx.arc(hx + f * 18 * hs, hy, 8 * hs, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        } else if (this.isAttacking) {
+          ctx.fillStyle = "#ff9f1c";
+          ctx.beginPath();
+          ctx.arc(hx + f * 17 * hs, hy, 4.5 * hs, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+    }
+
+    draw() {
+      if (this.isThreeHeadDragon) {
+        this.drawThreeHeadDragon();
+        return;
+      }
+      drawStickmanFigure({
+        centerX: this.x + this.width / 2,
+        topY: this.y,
+        color: this.hitFlash > 0 ? "#ffffff" : this.color,
+        accent: this.accent,
+        facing: this.facing,
+        scale: this.scale,
+        walkCycle: this.walkCycle,
+        isRanged: this.isRanged,
+        isAttacking: this.isAttacking,
+        meleeWeapon: this.meleeWeapon,
+        rangedWeapon: this.rangedWeapon,
+        isMonster: this.isMonster,
+        showShadow: true
+      });
+    }
+  }
+
+  function drawArenaBackground() {
+    const arena = ARENAS[currentArenaIndex];
+    const now = Date.now();
+
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+    skyGrad.addColorStop(0, arena.skyTop);
+    skyGrad.addColorStop(0.55, arena.skyMid);
+    skyGrad.addColorStop(1, arena.skyBottom);
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(-20, -20, canvas.width + 40, GROUND_Y + 20);
+
+    for (let s of STARS) {
+      const twinkle = 0.3 + 0.65 * Math.sin(now * 0.003 + s.phase);
+      ctx.fillStyle = `rgba(255, 255, 255, ${twinkle.toFixed(2)})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.save();
+    ctx.fillStyle = arena.cloudColor;
+    for (let c of CLOUDS) {
+      const cx = ((c.x + now * 0.01 * c.speed) % (canvas.width + 200)) - 100;
+      ctx.beginPath();
+      ctx.ellipse(cx, c.y, c.w * 0.5, c.h * 0.5, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx - c.w * 0.22, c.y + 4, c.w * 0.32, c.h * 0.38, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx + c.w * 0.22, c.y + 4, c.w * 0.34, c.h * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = arena.sunHalo;
+    ctx.beginPath();
+    ctx.arc(arena.sunX, arena.sunY, 96, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = arena.sunColor;
+    ctx.shadowColor = arena.sunGlow;
+    ctx.shadowBlur = 34;
+    ctx.beginPath();
+    ctx.arc(arena.sunX, arena.sunY, 36, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.fillStyle = arena.farMountain;
+    ctx.beginPath();
+    ctx.moveTo(-20, GROUND_Y);
+    ctx.lineTo(75, 260);
+    ctx.lineTo(220, 320);
+    ctx.lineTo(375, 245);
+    ctx.lineTo(540, 325);
+    ctx.lineTo(710, 255);
+    ctx.lineTo(canvas.width + 20, 310);
+    ctx.lineTo(canvas.width + 20, GROUND_Y);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = arena.midMountain;
+    ctx.beginPath();
+    ctx.moveTo(-20, GROUND_Y);
+    ctx.lineTo(105, 250);
+    ctx.lineTo(250, 318);
+    ctx.lineTo(410, 232);
+    ctx.lineTo(580, 322);
+    ctx.lineTo(750, 248);
+    ctx.lineTo(canvas.width + 20, 304);
+    ctx.lineTo(canvas.width + 20, GROUND_Y);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = arena.mountainColor;
+    ctx.beginPath();
+    ctx.moveTo(-20, GROUND_Y);
+    ctx.lineTo(130, 235);
+    ctx.lineTo(270, 310);
+    ctx.lineTo(440, 215);
+    ctx.lineTo(610, 315);
+    ctx.lineTo(780, 240);
+    ctx.lineTo(canvas.width + 20, 295);
+    ctx.lineTo(canvas.width + 20, GROUND_Y);
+    ctx.closePath();
+    ctx.fill();
+
+    if (arena.id === "ice_valley") {
+      ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
+      ctx.beginPath();
+      ctx.moveTo(130, 235);
+      ctx.lineTo(104, 252);
+      ctx.lineTo(156, 252);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(440, 215);
+      ctx.lineTo(405, 238);
+      ctx.lineTo(475, 238);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    const pillarPositions = [110, 450, 790];
+    pillarPositions.forEach((px, i) => {
+      const topY = 120 + (i % 2) * 35;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.055)";
+      ctx.fillRect(px - 18, topY, 36, GROUND_Y - topY);
+      ctx.fillRect(px - 24, topY, 48, 8);
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px - 18, topY, 36, GROUND_Y - topY);
+    });
+
+    const groundGrad = ctx.createLinearGradient(0, GROUND_Y, 0, canvas.height);
+    groundGrad.addColorStop(0, arena.groundTop);
+    groundGrad.addColorStop(0.18, arena.groundMid);
+    groundGrad.addColorStop(0.2, arena.groundRockTop);
+    groundGrad.addColorStop(1, arena.groundRockBottom);
+    ctx.fillStyle = groundGrad;
+    ctx.fillRect(-20, GROUND_Y, canvas.width + 40, canvas.height - GROUND_Y + 30);
+
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.09)";
+    ctx.lineWidth = 1.5;
+    for (let gx = 40; gx < canvas.width; gx += 95) {
+      ctx.beginPath();
+      ctx.moveTo(gx, GROUND_Y + 26);
+      ctx.lineTo(gx + 28, GROUND_Y + 48);
+      ctx.lineTo(gx + 55, GROUND_Y + 42);
+      ctx.stroke();
+
+      ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
+      ctx.beginPath();
+      ctx.ellipse(gx + 14, GROUND_Y + 64, 12, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.save();
+    ctx.fillStyle = arena.trimColor;
+    ctx.shadowColor = arena.trimColor;
+    ctx.shadowBlur = 14;
+    ctx.fillRect(-20, GROUND_Y, canvas.width + 40, 4);
+    ctx.restore();
+  }
+
+  function drawStickmanFigure({
+                                centerX,
+                                topY,
+                                color,
+                                accent = "#ffffff",
+                                facing,
+                                scale = 1,
+                                walkCycle = 0,
+                                isRanged = false,
+                                isAttacking = false,
+                                meleeWeapon = "sword",
+                                rangedWeapon = "gun",
+                                isMonster = false,
+                                showShadow = false
+                              }) {
+    let headY = topY + 12 * scale;
+    let neckY = topY + 24 * scale;
+    let hipY = topY + 52 * scale;
+    let bottomY = topY + 80 * scale;
+
+    ctx.save();
+
+    if (showShadow) {
+      const heightAboveGround = Math.max(0, GROUND_Y - bottomY);
+      const shadowScale = Math.max(0.45, 1 - heightAboveGround / 260);
+      ctx.fillStyle = isMonster ? "rgba(199, 125, 255, 0.38)" : "rgba(0, 0, 0, 0.45)";
+      ctx.beginPath();
+      ctx.ellipse(centerX, GROUND_Y + 2, 23 * scale * shadowScale, 6 * scale * shadowScale, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      if (isMonster) {
+        ctx.strokeStyle = "rgba(255, 0, 85, 0.6)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(centerX, GROUND_Y + 2, 27 * scale * shadowScale, 7.5 * scale * shadowScale, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+
+    ctx.save();
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = 0.72;
+    const scarfWave = Math.sin(walkCycle * 1.4) * 3.5 * scale;
+    ctx.beginPath();
+    ctx.moveTo(centerX - facing * 2 * scale, neckY);
+    ctx.lineTo(centerX - facing * 16 * scale, neckY + 4 * scale + scarfWave);
+    ctx.lineTo(centerX - facing * 12 * scale, neckY + 11 * scale + scarfWave);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = color;
+    ctx.shadowColor = isMonster ? "#c77dff" : color;
+    ctx.shadowBlur = isMonster ? 20 : 13;
+    ctx.lineWidth = (isMonster ? 5.2 : 4.2) * scale;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    if (isMonster) {
+      ctx.fillStyle = "#ff0055";
+      ctx.beginPath();
+      ctx.moveTo(centerX - 6 * scale, headY - 8 * scale);
+      ctx.lineTo(centerX - 15 * scale, headY - 22 * scale);
+      ctx.lineTo(centerX - 1 * scale, headY - 11 * scale);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(centerX + 6 * scale, headY - 8 * scale);
+      ctx.lineTo(centerX + 15 * scale, headY - 22 * scale);
+      ctx.lineTo(centerX + 1 * scale, headY - 11 * scale);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.beginPath();
+    ctx.arc(centerX, headY, 11 * scale, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.shadowBlur = isMonster ? 10 : 4;
+    ctx.shadowColor = isMonster ? "#ffe600" : accent;
+    ctx.fillStyle = isMonster ? "#ffe600" : "#ffffff";
+    let eyeSize = (isMonster ? 4.8 : 4) * scale;
+    ctx.fillRect(centerX + (facing * 4 * scale) - eyeSize / 2, headY - 3 * scale, eyeSize, eyeSize);
+
+    ctx.strokeStyle = color;
+    ctx.shadowColor = isMonster ? "#c77dff" : color;
+    ctx.shadowBlur = isMonster ? 15 : 9;
+    ctx.beginPath();
+    ctx.moveTo(centerX, neckY);
+    ctx.lineTo(centerX, hipY);
+    ctx.stroke();
+
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2.8 * scale;
+    ctx.beginPath();
+    ctx.moveTo(centerX - 6 * scale, neckY + 2 * scale);
+    ctx.lineTo(centerX + 6 * scale, neckY + 2 * scale);
+    ctx.stroke();
+
+    if (isMonster) {
+      ctx.fillStyle = "#e0aaff";
+      for (let k = 0; k < 3; k++) {
+        let sy = neckY + 6 * scale + k * 8 * scale;
+        ctx.beginPath();
+        ctx.moveTo(centerX - facing * 2 * scale, sy - 3 * scale);
+        ctx.lineTo(centerX - facing * 12 * scale, sy);
+        ctx.lineTo(centerX - facing * 2 * scale, sy + 3 * scale);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = (isMonster ? 5.2 : 4.2) * scale;
+    let legSwing = Math.sin(walkCycle) * 12 * scale;
+    ctx.beginPath();
+    ctx.moveTo(centerX, hipY);
+    ctx.lineTo(centerX - 10 * scale + legSwing, bottomY);
+    ctx.moveTo(centerX, hipY);
+    ctx.lineTo(centerX + 10 * scale - legSwing, bottomY);
+    ctx.stroke();
+
+    let shoulderY = neckY + 6 * scale;
+    let handX = centerX + (facing * 18 * scale);
+    let handY = shoulderY + 10 * scale;
+
+    if (isRanged) {
+      handX = centerX + (facing * 24 * scale);
+      handY = shoulderY + 2 * scale;
+    } else if (isAttacking) {
+      handX = centerX + (facing * 26 * scale);
+      handY = shoulderY;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(centerX, shoulderY);
+    ctx.lineTo(handX, handY);
+    ctx.stroke();
+
+    ctx.translate(handX, handY);
+    ctx.shadowBlur = isMonster ? 14 : 8;
+    if (!isRanged) {
+      if (meleeWeapon === "sword") {
+        let angle = isAttacking ? 0.15 : -Math.PI / 3;
+        ctx.rotate(angle * facing);
+
+        ctx.strokeStyle = isMonster ? "#f3d5ff" : "#f8fafc";
+        ctx.shadowColor = isMonster ? "#c77dff" : color;
+        ctx.lineWidth = 5 * scale;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(facing * 55 * scale, 0);
+        ctx.stroke();
+
+        ctx.strokeStyle = "#ffd166";
+        ctx.shadowColor = "#ffd166";
+        ctx.lineWidth = 6 * scale;
+        ctx.beginPath();
+        ctx.moveTo(facing * 8 * scale, -8 * scale);
+        ctx.lineTo(facing * 8 * scale, 8 * scale);
+        ctx.stroke();
+      } else if (meleeWeapon === "spear") {
+        let thrustOffset = isAttacking ? facing * 25 * scale : 0;
+
+        ctx.strokeStyle = isMonster ? "#9d4edd" : "#e07a5f";
+        ctx.shadowColor = isMonster ? "#9d4edd" : "#e07a5f";
+        ctx.lineWidth = 4.2 * scale;
+        ctx.beginPath();
+        ctx.moveTo(-facing * 25 * scale + thrustOffset, 0);
+        ctx.lineTo(facing * 55 * scale + thrustOffset, 0);
+        ctx.stroke();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.shadowColor = isMonster ? "#e0aaff" : "#ffd166";
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.moveTo(facing * 55 * scale + thrustOffset, -5.5 * scale);
+        ctx.lineTo(facing * 74 * scale + thrustOffset, 0);
+        ctx.lineTo(facing * 55 * scale + thrustOffset, 5.5 * scale);
+        ctx.closePath();
+        ctx.fill();
+      }
+    } else {
+      if (rangedWeapon === "gun") {
+        let recoil = isAttacking ? -facing * 5 * scale : 0;
+        ctx.fillStyle = "#e2e8f0";
+        ctx.fillRect(recoil, -4 * scale, facing * 28 * scale, 8 * scale);
+        ctx.fillStyle = "#64748b";
+        ctx.fillRect(recoil, 2 * scale, facing * 10 * scale, 8 * scale);
+      } else if (rangedWeapon === "bow") {
+        ctx.strokeStyle = "#f4a261";
+        ctx.lineWidth = 4 * scale;
+        ctx.beginPath();
+        ctx.arc(facing * 6 * scale, 0, 22 * scale, -Math.PI / 2.2, Math.PI / 2.2);
+        ctx.stroke();
+
+        ctx.strokeStyle = "#e2e8f0";
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 1.6 * scale;
+        ctx.beginPath();
+        ctx.moveTo(facing * 6 * scale, -20 * scale);
+        ctx.lineTo(facing * (isAttacking ? 0 : -4 * scale), 0);
+        ctx.lineTo(facing * 6 * scale, 20 * scale);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  let player1 = null;
+  let player2 = null;
+  const keys = {};
+
+  function clearTransientEntities() {
+    projectiles.length = 0;
+    particles.length = 0;
+    slashes.length = 0;
+    zombies.length = 0;
+    itemDrops.length = 0;
+    floatingTexts.length = 0;
+    afterimages.length = 0;
+    resetScreenShake();
+  }
+
+  function toggleMatchMode() {
+    if (matchMode === "bot") matchMode = "2p";
+    else if (matchMode === "2p") matchMode = "zombie";
+    else matchMode = "bot";
+
+    p1Ready = false;
+    p2Ready = false;
+  }
+
+  function cycleArena() {
+    currentArenaIndex = (currentArenaIndex + 1) % ARENAS.length;
+  }
+
+  function startMatch() {
+    ensureAudioContext();
+    clearTransientEntities();
+
+    const p1Profile = ROSTER[p1SelectIndex];
+    const p1Height = 80 * (p1Profile.scale || 1);
+
+    player1 = new Stickman({
+      x: 420,
+      y: GROUND_Y - p1Height,
+      facing: 1,
+      profile: p1Profile,
+      isBot: false
+    });
+
+    if (matchMode === "zombie") {
+      zombieWave = 1;
+      zombieKills = 0;
+      waveKills = 0;
+      lastBossWave = 0;
+      zombieSpawnTimer = 30;
+      p1Level = 1;
+      p1Xp = 0;
+      p1XpNeed = 100;
+      gameState = "zombie";
+      startBGM();
+      return;
+    }
+
+    const isBotDragon = matchMode === "bot";
+    const p2Profile = isBotDragon ? THREE_HEAD_DRAGON_PROFILE : ROSTER[p2SelectIndex];
+    const p2Height = 84 * (p2Profile.scale || 1);
+    player1.x = 140;
+
+    player2 = new Stickman({
+      x: 710,
+      y: GROUND_Y - p2Height,
+      facing: -1,
+      profile: p2Profile,
+      isBot: isBotDragon,
+      isThreeHeadDragon: isBotDragon
+    });
+    gameState = "fight";
+    startBGM();
+  }
+
+  function backToSelect() {
+    stopBGM();
+    p1Ready = false;
+    p2Ready = false;
+    clearTransientEntities();
+    gameState = "select";
+  }
+
+  window.addEventListener("keydown", (e) => {
+    ensureAudioContext();
+    if (!keys[e.code]) {
+      if (e.code === "KeyN") {
+        toggleSoundMute();
+      }
+
+      if (gameState === "select") {
+        if (e.code === "KeyM" || e.code === "Tab") {
+          e.preventDefault();
+          toggleMatchMode();
+        }
+        if (e.code === "KeyB") {
+          cycleArena();
+        }
+
+        if (!p1Ready) {
+          if (e.code === "KeyA") {
+            p1SelectIndex = (p1SelectIndex - 1 + ROSTER.length) % ROSTER.length;
+          } else if (e.code === "KeyD") {
+            p1SelectIndex = (p1SelectIndex + 1) % ROSTER.length;
+          } else if (e.code === "Space") {
+            p1Ready = true;
+            if (matchMode === "bot" || matchMode === "zombie") {
+              p2Ready = true;
+            }
+          }
+        } else if (e.code === "KeyE") {
+          p1Ready = false;
+          if (matchMode === "bot" || matchMode === "zombie") p2Ready = false;
+        }
+
+        if (matchMode === "2p") {
+          if (!p2Ready) {
+            if (e.code === "ArrowLeft") {
+              p2SelectIndex = (p2SelectIndex - 1 + ROSTER.length) % ROSTER.length;
+            } else if (e.code === "ArrowRight") {
+              p2SelectIndex = (p2SelectIndex + 1) % ROSTER.length;
+            } else if (e.code === "Enter") {
+              p2Ready = true;
+            }
+          } else if (e.code === "KeyP" || e.code === "Backspace" || e.code === "ShiftRight") {
+            p2Ready = false;
+          }
+        }
+
+        if (p1Ready && p2Ready) {
+          startMatch();
+        }
+      } else if (gameState === "fight" || gameState === "zombie") {
+        if (e.code === "Space") player1.attack();
+        if (e.code === "KeyE") player1.switchWeapon();
+        if (e.code === "KeyQ") player1.toggleMonsterForm();
+        if (e.code === "KeyZ") player1.throwSpear();
+
+        if (gameState === "fight" && !player2.isBot) {
+          if (e.code === "Enter") player2.attack();
+          if (e.code === "KeyP") player2.switchWeapon();
+          if (e.code === "KeyL") player2.toggleMonsterForm();
+          if (e.code === "ShiftLeft" || e.code === "ShiftRight") player2.throwSpear();
+        }
+      } else if (gameState === "gameover") {
+        if (e.code === "KeyR") {
+          startMatch();
+        } else if (e.code === "KeyC") {
+          backToSelect();
+        }
+      }
+    }
+    keys[e.code] = true;
+  });
+
+  window.addEventListener("keyup", (e) => keys[e.code] = false);
+
+  function handleFightInput() {
+    if (keys["KeyA"]) {
+      player1.vx += -player1.moveSpeed * 0.35;
+      player1.facing = -1;
+    }
+    if (keys["KeyD"]) {
+      player1.vx += player1.moveSpeed * 0.35;
+      player1.facing = 1;
+    }
+    if (keys["KeyW"] && player1.isGrounded) {
+      player1.vy = -player1.jumpPower;
+      playJumpSound();
+    }
+
+    if (gameState === "fight" && !player2.isBot) {
+      if (keys["ArrowLeft"]) {
+        player2.vx += -player2.moveSpeed * 0.35;
+        player2.facing = -1;
+      }
+      if (keys["ArrowRight"]) {
+        player2.vx += player2.moveSpeed * 0.35;
+        player2.facing = 1;
+      }
+      if (keys["ArrowUp"] && player2.isGrounded) {
+        player2.vy = -player2.jumpPower;
+        playJumpSound();
+      }
+    }
+  }
+
+  function drawZombieUI() {
+    const waveNeed = getWaveTargetKills(zombieWave);
+    ctx.save();
+    ctx.fillStyle = "rgba(15, 23, 42, 0.86)";
+    ctx.beginPath();
+    ctx.roundRect(24, 16, canvas.width - 48, 55, 8);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.14)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(40, 26, 260, 16);
+    ctx.fillStyle = player1.color;
+    ctx.fillRect(40, 26, Math.max(0, (player1.hp / player1.maxHp) * 260), 16);
+    ctx.strokeStyle = "#fff";
+    ctx.strokeRect(40, 26, 260, 16);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 12px Arial";
+    ctx.textAlign = "left";
+    ctx.fillText(`HP: ${player1.hp}/${player1.maxHp} (Cấp ${p1Level})`, 45, 39);
+
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(40, 48, 260, 8);
+    ctx.fillStyle = "#ffd166";
+    ctx.fillRect(40, 48, Math.max(0, (p1Xp / p1XpNeed) * 260), 8);
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#2ec4b6";
+    ctx.font = "bold 18px Arial";
+    ctx.fillText(`SINH TỒN ZOMBIE - ĐỢT ${zombieWave} (${waveKills}/${waveNeed})`, canvas.width / 2, 38);
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = "12px Arial";
+    ctx.fillText(`Tổng diệt: ${zombieKills} • Đam cận chiến: ${player1.meleeDamage} • Sàn: ${ARENAS[currentArenaIndex].name}`, canvas.width / 2, 58);
+
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#ff595e";
+    ctx.font = "bold 14px Arial";
+    ctx.fillText(`Zombie trên sân: ${zombies.length}`, canvas.width - 40, 42);
+
+    const activeBoss = zombies.find(z => z.type === "boss");
+    if (activeBoss) {
+      ctx.fillStyle = "rgba(180, 0, 0, 0.88)";
+      ctx.fillRect(canvas.width / 2 - 180, 78, 360, 16);
+      ctx.fillStyle = "#ff4d6d";
+      ctx.fillRect(canvas.width / 2 - 180, 78, Math.max(0, (activeBoss.hp / activeBoss.maxHp) * 360), 16);
+      ctx.strokeStyle = "#ffffff";
+      ctx.strokeRect(canvas.width / 2 - 180, 78, 360, 16);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 11px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(`BOSS KHỔNG LỒ: ${activeBoss.hp} / ${activeBoss.maxHp}`, canvas.width / 2, 90);
+    }
+    ctx.restore();
+  }
+
+  function drawSelectScreen() {
+    drawArenaBackground();
+    ctx.fillStyle = "rgba(10, 14, 29, 0.78)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.fillStyle = "#ffd166";
+    ctx.font = "bold 22px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(`CHỌN NHÂN VẬT (${ROSTER.length} ĐẤU SĨ), CHẾ ĐỘ & SÀN ĐẤU`, canvas.width / 2, 26);
+
+    ctx.font = "bold 12.5px Arial";
+    let modeText = "CHẾ ĐỘ: 1P vs RỒNG 3 ĐẦU [M]";
+    let modeColor = "#ff4d6d";
+    if (matchMode === "2p") {
+      modeText = "CHẾ ĐỘ: 1P vs 2P [M]";
+      modeColor = "#00d2ff";
+    } else if (matchMode === "zombie") {
+      modeText = "CHẾ ĐỘ: ZOMBIE SINH TỒN [M]";
+      modeColor = "#2ec4b6";
+    }
+
+    ctx.fillStyle = modeColor;
+    const arenaLabel = `SÀN ĐẤU: ${ARENAS[currentArenaIndex].name} (${currentArenaIndex + 1}/${ARENAS.length}) [B]`;
+    ctx.fillText(`${modeText}   •   ${arenaLabel}`, canvas.width / 2, 47);
+
+    const cols = 4;
+    const rows = Math.ceil(ROSTER.length / cols);
+    const cardWidth = 198;
+    const cardHeight = 62;
+    const gapX = 14;
+    const gapY = 8;
+    const totalWidth = cols * cardWidth + (cols - 1) * gapX;
+    const startX = (canvas.width - totalWidth) / 2;
+    const startY = 58;
+
+    ROSTER.forEach((char, idx) => {
+      const row = Math.floor(idx / cols);
+      const col = idx % cols;
+      const x = startX + col * (cardWidth + gapX);
+      const y = startY + row * (cardHeight + gapY);
+      const isP1 = p1SelectIndex === idx;
+      const isP2 = matchMode === "2p" && p2SelectIndex === idx;
+
+      ctx.save();
+      const cardGrad = ctx.createLinearGradient(x, y, x, y + cardHeight);
+      cardGrad.addColorStop(0, "rgba(38, 52, 92, 0.94)");
+      cardGrad.addColorStop(1, "rgba(20, 28, 52, 0.96)");
+      ctx.fillStyle = cardGrad;
+      ctx.beginPath();
+      ctx.roundRect(x, y, cardWidth, cardHeight, 8);
+      ctx.fill();
+
+      let borderColor = "#4a5d8a";
+      if (isP1 && isP2) borderColor = "#ffffff";
+      else if (isP1) borderColor = "#00d2ff";
+      else if (isP2) borderColor = "#ff6b6b";
+
+      ctx.strokeStyle = borderColor;
+      ctx.lineWidth = (isP1 || isP2) ? 2.6 : 1.3;
+      if (isP1 || isP2) {
+        ctx.shadowColor = borderColor;
+        ctx.shadowBlur = 10;
+      }
+      ctx.stroke();
+      ctx.restore();
+
+      const previewScale = Math.min(char.scale || 1, 0.85) * 0.44;
+      drawStickmanFigure({
+        centerX: x + 28,
+        topY: y + 11,
+        color: char.color,
+        accent: char.accent,
+        facing: 1,
+        scale: previewScale,
+        meleeWeapon: char.meleeWeapon
+      });
+
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 11px Arial";
+      ctx.textAlign = "left";
+      ctx.fillText(char.name, x + 54, y + 18);
+
+      ctx.fillStyle = "#cbd5e1";
+      ctx.font = "9px Arial";
+      ctx.fillText(`HP:${char.maxHp} • Đam:${char.meleeDamage} • Tốc:${char.moveSpeed}`, x + 54, y + 33);
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillText(char.desc, x + 54, y + 48);
+
+      ctx.font = "bold 9.5px Arial";
+      if (isP1) {
+        ctx.fillStyle = "#00d2ff";
+        ctx.textAlign = "right";
+        ctx.fillText(p1Ready ? "P1 [READY]" : "P1", x + cardWidth - 7, y + 17);
+      }
+      if (isP2) {
+        ctx.fillStyle = "#ff6b6b";
+        ctx.textAlign = "right";
+        ctx.fillText(p2Ready ? "[READY] P2" : "P2", x + cardWidth - 7, y + (isP1 ? 30 : 17));
+      }
+    });
+
+    const footerTopY = startY + rows * (cardHeight + gapY) + 8;
+    const p1Char = ROSTER[p1SelectIndex];
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#00d2ff";
+    ctx.font = "bold 12.5px Arial";
+    ctx.fillText(`P1: ${p1Char.name} ${p1Ready ? "(ĐÃ CHỐT - E đổi)" : "(A/D chọn, Space chốt)"}`, 36, footerTopY);
+
+    ctx.textAlign = "right";
+    if (matchMode === "2p") {
+      const p2Char = ROSTER[p2SelectIndex];
+      ctx.fillStyle = "#ff6b6b";
+      ctx.fillText(`P2: ${p2Char.name} ${p2Ready ? "(ĐÃ CHỐT - Backspace/P đổi)" : "(Trái/Phải chọn, Enter chốt)"}`, canvas.width - 36, footerTopY);
+    } else if (matchMode === "zombie") {
+      ctx.fillStyle = "#2ec4b6";
+      ctx.fillText("Zombie: Bấm Space chốt để đại chiến thây ma & Boss", canvas.width - 36, footerTopY);
+    } else {
+      ctx.fillStyle = "#ff6b6b";
+      ctx.fillText("BOT: Rồng 3 Đầu Hỏa Ngục (HP: 260 • Khạc Lửa Đặc Biệt)", canvas.width - 36, footerTopY);
+    }
+
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "12px Arial";
+    ctx.fillText(`[M] Đổi chế độ • [B] Đổi sàn • [N] Âm thanh & Nhạc (${soundMuted ? "Tắt" : "Bật"}) • Ném giáo [Z]/[Shift] • Hóa Quái [Q]/[L]`, canvas.width / 2, footerTopY + 26);
+  }
+
+  function drawFightUI() {
+    ctx.save();
+    ctx.fillStyle = "rgba(15, 23, 42, 0.82)";
+    ctx.beginPath();
+    ctx.roundRect(28, 20, 354, 24, 6);
+    ctx.fill();
+
+    ctx.fillStyle = player1.color;
+    ctx.shadowColor = player1.color;
+    ctx.shadowBlur = 12;
+    const p1Width = Math.max(0, (player1.hp / player1.maxHp) * 350);
+    ctx.beginPath();
+    ctx.roundRect(30, 22, p1Width, 20, 5);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle = "rgba(255,255,255,0.78)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(30, 22, 350, 20);
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 11.5px Arial";
+    ctx.textAlign = "left";
+    let p1WeaponText = player1.isRanged
+            ? `${player1.rangedWeapon === "gun" ? "SÚNG" : "CUNG"} (${player1.rangedDamage})`
+            : `${player1.meleeWeapon === "sword" ? "KIẾM" : "GIÁO"} (${player1.meleeDamage})`;
+    let p1ThrowText = player1.canThrowSpear() ? (player1.throwCooldown > 0 ? `Z(${(player1.throwCooldown / 60).toFixed(1)}s)` : "Z:Ném") : "";
+    let p1FormText = player1.isMonster ? "QUÁI[Q]" : (player1.monsterCooldown > 0 ? `Q(${Math.ceil(player1.monsterCooldown / 60)}s)` : "Q:Quái");
+    ctx.fillText(`P1 • ${player1.name} (${player1.hp}/${player1.maxHp}) • ${p1WeaponText}${p1ThrowText ? " • " + p1ThrowText : ""} • ${p1FormText}`, 30, 60);
+
+    ctx.fillStyle = "rgba(15, 23, 42, 0.82)";
+    ctx.beginPath();
+    ctx.roundRect(518, 20, 354, 24, 6);
+    ctx.fill();
+
+    ctx.fillStyle = player2.color;
+    ctx.shadowColor = player2.color;
+    ctx.shadowBlur = 12;
+    let p2BarWidth = Math.max(0, (player2.hp / player2.maxHp) * 350);
+    ctx.beginPath();
+    ctx.roundRect(520 + (350 - p2BarWidth), 22, p2BarWidth, 20, 5);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle = "rgba(255,255,255,0.78)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(520, 22, 350, 20);
+
+    ctx.textAlign = "right";
+    if (player2.isThreeHeadDragon) {
+      const specialText = player2.specialCooldown > 0
+              ? `Lửa Đặc Biệt: ${(player2.specialCooldown / 60).toFixed(1)}s`
+              : "Lửa Đặc Biệt: SẴN SÀNG!";
+      let p2WeaponText = player2.isRanged ? `KHẠC 3 LỬA (${player2.rangedDamage})` : `CÀO RỒNG (${player2.meleeDamage})`;
+      ctx.fillText(`${specialText} • ${p2WeaponText} • ${player2.name} (${player2.hp}/${player2.maxHp})`, 870, 60);
+    } else {
+      let p2WeaponText = player2.isRanged
+              ? `${player2.rangedWeapon === "gun" ? "SÚNG" : "CUNG"} (${player2.rangedDamage})`
+              : `${player2.meleeWeapon === "sword" ? "KIẾM" : "GIÁO"} (${player2.meleeDamage})`;
+      ctx.fillText(`${p2WeaponText} • ${player2.name} (${player2.hp}/${player2.maxHp}) • P2`, 870, 60);
+    }
+
+    ctx.fillStyle = "#ffd166";
+    ctx.shadowColor = "#ffd166";
+    ctx.shadowBlur = 14;
+    ctx.font = "bold 24px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("VS", canvas.width / 2, 40);
+
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
+    ctx.font = "11.5px Arial";
+    ctx.fillText(ARENAS[currentArenaIndex].name, canvas.width / 2, 60);
+    ctx.restore();
+  }
+
+  function updateAndDrawEffects() {
+    for (let i = afterimages.length - 1; i >= 0; i--) {
+      afterimages[i].update();
+      afterimages[i].draw();
+      if (afterimages[i].life <= 0) afterimages.splice(i, 1);
+    }
+    for (let i = slashes.length - 1; i >= 0; i--) {
+      slashes[i].update();
+      slashes[i].draw();
+      if (slashes[i].life <= 0) slashes.splice(i, 1);
+    }
+    for (let i = particles.length - 1; i >= 0; i--) {
+      particles[i].update();
+      particles[i].draw();
+      if (particles[i].life <= 0) particles.splice(i, 1);
+    }
+    for (let i = floatingTexts.length - 1; i >= 0; i--) {
+      floatingTexts[i].update();
+      floatingTexts[i].draw();
+      if (floatingTexts[i].life <= 0) floatingTexts.splice(i, 1);
+    }
+  }
+
+  function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    if (screenShakeTime > 0) {
+      const dx = (Math.random() - 0.5) * 2 * screenShakeIntensity;
+      const dy = (Math.random() - 0.5) * 2 * screenShakeIntensity;
+      ctx.translate(dx, dy);
+      screenShakeTime--;
+      if (screenShakeTime <= 0) {
+        screenShakeIntensity = 0;
+      }
+    }
+
+    if (gameState === "select") {
+      drawSelectScreen();
+      updateAndDrawEffects();
+    } else if (gameState === "zombie") {
+      drawArenaBackground();
+      spawnArenaAmbient();
+      spawnZombieWaveLogic();
+
+      if (waveKills >= getWaveTargetKills(zombieWave)) {
+        zombieWave++;
+        waveKills = 0;
+        zombieSpawnTimer = 25;
+        playWaveClearSound();
+        spawnFloatingText(canvas.width / 2, 115, `ĐỢT ${zombieWave} BẮT ĐẦU!`, "#2ec4b6", 17);
+      }
+
+      handleFightInput();
+      player1.update(zombies);
+
+      for (let i = itemDrops.length - 1; i >= 0; i--) {
+        itemDrops[i].update(player1);
+        itemDrops[i].draw();
+        if (!itemDrops[i].active) itemDrops.splice(i, 1);
+      }
+
+      for (let i = zombies.length - 1; i >= 0; i--) {
+        const z = zombies[i];
+        z.update(player1);
+        if (z.hp <= 0) {
+          awardZombieKill(z, player1);
+          zombies.splice(i, 1);
+        } else {
+          z.draw();
+        }
+      }
+
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        let p = projectiles[i];
+        p.update(zombies);
+        p.draw();
+        if (!p.active) projectiles.splice(i, 1);
+      }
+
+      updateAndDrawEffects();
+      player1.draw();
+      drawZombieUI();
+
+      if (player1.hp <= 0) {
+        gameState = "gameover";
+        stopBGM();
+      }
+    } else if (gameState === "fight") {
+      drawArenaBackground();
+      spawnArenaAmbient();
+      handleFightInput();
+      player1.update(player2);
+      player2.update(player1);
+
+      for (let i = projectiles.length - 1; i >= 0; i--) {
+        let p = projectiles[i];
+        let target = p.owner === player1 ? player2 : player1;
+        p.update(target);
+        p.draw();
+        if (!p.active) projectiles.splice(i, 1);
+      }
+
+      updateAndDrawEffects();
+      player1.draw();
+      player2.draw();
+      drawFightUI();
+
+      if (player1.hp <= 0 || player2.hp <= 0) {
+        if (player1.hp <= 0 && player2.hp <= 0) {
+          playDrawSound();
+          spawnFloatingText(canvas.width / 2, canvas.height / 2 - 65, "CẢ HAI CÙNG GỤC NGÃ!", "#ffd166", 16);
+          gameState = "gameover";
+          drawGraceFrames = 0;
+          stopBGM();
+        } else {
+          if (drawGraceFrames === 0) {
+            drawGraceFrames = 14;
+          } else {
+            drawGraceFrames--;
+          }
+          if (drawGraceFrames <= 0) {
+            gameState = "gameover";
+            stopBGM();
+          }
+        }
+      } else {
+        drawGraceFrames = 0;
+      }
+    }
+
+    if (gameState === "gameover") {
+      drawArenaBackground();
+      if (matchMode === "zombie") {
+        zombies.forEach(z => z.draw());
+        player1.draw();
+        updateAndDrawEffects();
+        drawZombieUI();
+      } else {
+        player1.draw();
+        player2.draw();
+        updateAndDrawEffects();
+        drawFightUI();
+      }
+
+      const isDrawMatch = matchMode !== "zombie" && player1.hp <= 0 && player2.hp <= 0;
+
+      ctx.fillStyle = "rgba(10, 14, 28, 0.78)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      if (matchMode === "zombie") {
+        ctx.font = "bold 30px Arial";
+        ctx.fillText("BẠN ĐÃ BỊ TẤN CÔNG!", canvas.width / 2, canvas.height / 2 - 34);
+        ctx.font = "bold 18px Arial";
+        ctx.fillStyle = "#cbd5e1";
+        ctx.fillText(`Tiêu diệt: ${zombieKills} Zombie  •  Đợt ${zombieWave}  •  Cấp ${p1Level}`, canvas.width / 2, canvas.height / 2 + 2);
+      } else {
+        const p2Label = player2.isThreeHeadDragon ? "BOT RỒNG 3 ĐẦU" : "P2";
+        let winnerText;
+        if (isDrawMatch) {
+          winnerText = "HÒA NHAU!";
+        } else if (player1.hp <= 0) {
+          winnerText = `${player2.name.toUpperCase()} (${p2Label}) CHIẾN THẮNG!`;
+        } else {
+          winnerText = `${player1.name.toUpperCase()} (P1) CHIẾN THẮNG!`;
+        }
+        ctx.save();
+        ctx.font = "bold 34px Arial";
+        if (isDrawMatch) {
+          ctx.fillStyle = "#ffd166";
+          ctx.shadowColor = "#ffd166";
+          ctx.shadowBlur = 18;
+        }
+        ctx.fillText(winnerText, canvas.width / 2, canvas.height / 2 - 18);
+        if (isDrawMatch) {
+          ctx.shadowBlur = 0;
+          ctx.font = "bold 15px Arial";
+          ctx.fillStyle = "#e2e8f0";
+          ctx.fillText("Hai đấu sĩ gục ngã cùng lúc • Bất phân thắng bại", canvas.width / 2, canvas.height / 2 + 12);
+        }
+        ctx.restore();
+      }
+
+      ctx.font = "19px Arial";
+      ctx.fillStyle = "#ffd166";
+      ctx.fillText("Bấm [R] để chơi lại  •  Bấm [C] để chọn lại chế độ / nhân vật", canvas.width / 2, canvas.height / 2 + 48);
+    }
+
+    ctx.restore();
+    requestAnimationFrame(gameLoop);
+  }
+
+  gameLoop();
+</script>
+</body>
+</html>
